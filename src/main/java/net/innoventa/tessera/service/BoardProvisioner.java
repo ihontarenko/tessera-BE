@@ -12,14 +12,20 @@ import net.innoventa.tessera.repository.BoardRepository;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
-import java.util.List;
+import java.util.EnumSet;
+import java.util.Set;
 import java.util.function.Supplier;
 
 /**
- * Seeds a project's {@link Board} (ADR-0009): one board plus the three default columns — To Do /
- * In Progress / Done, one per {@link StatusCategory}, each a category fallback with no explicit status
- * mappings (ADR-0010) — so a freshly seeded board shows every issue by category with zero
- * configuration. Every project gets a board, with no branch on what kind of project it is.
+ * Seeds a project's {@link Board} (ADR-0009): one board plus one column per {@link StatusCategory} the
+ * project's workflows can actually reach, each a category fallback with no explicit status mappings
+ * (ADR-0010) — so a freshly seeded board shows every issue by category with zero configuration. Every
+ * project gets a board, with no branch on what kind of project it is.
+ * <p>
+ * The columns are <strong>derived, not fixed</strong>: a project on a To Do ↔ Done workflow opens with
+ * two columns rather than a dead "In Progress" nothing can ever enter, while the full workflow still
+ * yields the familiar three. Only newly seeded boards are shaped this way — columns are configurable,
+ * and an existing board is never rewritten.
  * <p>
  * The scope strategy is a <strong>parameter</strong> rather than something looked up here. It used to
  * be read from a type -> preset table through {@code Project.type}; with the type gone (ADR-0015) the
@@ -38,17 +44,8 @@ public class BoardProvisioner {
 
     private final BoardRepository boardRepository;
     private final BoardColumnRepository boardColumnRepository;
+    private final WorkflowResolver workflowResolver;
     private final Supplier<String> idGenerator;
-
-    /** The three default columns, in board order: one fallback column per status category. */
-    private record DefaultColumn(String name, StatusCategory category) {
-    }
-
-    private static final List<DefaultColumn> DEFAULT_COLUMNS = List.of(
-        new DefaultColumn("To Do", StatusCategory.TODO),
-        new DefaultColumn("In Progress", StatusCategory.IN_PROGRESS),
-        new DefaultColumn("Done", StatusCategory.DONE)
-    );
 
     /**
      * Provision {@code project}'s board if it has none, returning the existing or newly created board.
@@ -73,18 +70,41 @@ public class BoardProvisioner {
             .build());
 
         int position = 0;
-        for (DefaultColumn definition : DEFAULT_COLUMNS) {
+        for (StatusCategory category : defaultColumnCategories(project)) {
             boardColumnRepository.save(BoardColumn.builder()
                 .id(idGenerator.get())
                 .boardId(board.getId())
-                .name(definition.name())
+                .name(defaultColumnName(category))
                 .position(position)
-                .fallbackForCategory(definition.category())
+                .fallbackForCategory(category)
                 .build());
             position++;
         }
 
         return board;
+    }
+
+    /**
+     * The categories the seeded board gets a column for, in board order. A workflow leading nowhere at
+     * all would otherwise seed a columnless board, so that degenerate case falls back to all three —
+     * provisioning always produces something usable.
+     */
+    private Set<StatusCategory> defaultColumnCategories(Project project) {
+        Set<StatusCategory> reachable = workflowResolver.reachableCategories(project);
+
+        if (reachable.isEmpty()) {
+            return EnumSet.allOf(StatusCategory.class);
+        }
+
+        return reachable;
+    }
+
+    private String defaultColumnName(StatusCategory category) {
+        return switch (category) {
+            case TODO -> "To Do";
+            case IN_PROGRESS -> "In Progress";
+            case DONE -> "Done";
+        };
     }
 
 }

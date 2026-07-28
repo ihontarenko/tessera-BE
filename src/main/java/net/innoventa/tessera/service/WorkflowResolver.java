@@ -3,6 +3,7 @@ package net.innoventa.tessera.service;
 import lombok.RequiredArgsConstructor;
 import net.innoventa.tessera.domain.Project;
 import net.innoventa.tessera.domain.Status;
+import net.innoventa.tessera.domain.StatusCategory;
 import net.innoventa.tessera.domain.Transition;
 import net.innoventa.tessera.domain.WorkflowScheme;
 import net.innoventa.tessera.domain.WorkflowSchemeItem;
@@ -14,7 +15,11 @@ import net.innoventa.tessera.repository.WorkflowSchemeRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.EnumSet;
 import java.util.List;
+import java.util.Set;
+import java.util.stream.Collectors;
+import java.util.stream.Stream;
 
 /**
  * Resolves which {@link net.innoventa.tessera.domain.Workflow} governs an issue and answers the
@@ -35,13 +40,39 @@ public class WorkflowResolver {
 
     /** The workflow an issue of {@code issueTypeId} runs under in {@code project}. */
     public String resolveWorkflowId(Project project, String issueTypeId) {
-        WorkflowScheme scheme = workflowSchemeRepository.findById(project.getWorkflowSchemeId())
-            .orElseThrow(() -> new ResourceNotFoundException(
-                "Workflow scheme not found: " + project.getWorkflowSchemeId()));
+        WorkflowScheme scheme = requireScheme(project.getWorkflowSchemeId());
 
         return workflowSchemeItemRepository.findBySchemeIdAndIssueTypeId(scheme.getId(), issueTypeId)
             .map(WorkflowSchemeItem::getWorkflowId)
             .orElse(scheme.getDefaultWorkflowId());
+    }
+
+    /**
+     * The categories a {@code project}'s issues can actually end up in — the category of every status
+     * some transition in its scheme leads to, across the default workflow and any per-type override. A
+     * To Do ↔ Done workflow answers {@code [TODO, DONE]}; the default workflow answers all three. An
+     * {@link EnumSet}, so iteration follows the fixed TODO → IN_PROGRESS → DONE declaration order that
+     * board columns are seeded in (ADR-0010).
+     */
+    public Set<StatusCategory> reachableCategories(Project project) {
+        WorkflowScheme scheme = requireScheme(project.getWorkflowSchemeId());
+
+        List<String> workflowIds = Stream.concat(
+                Stream.of(scheme.getDefaultWorkflowId()),
+                workflowSchemeItemRepository.findBySchemeId(scheme.getId()).stream()
+                    .map(WorkflowSchemeItem::getWorkflowId))
+            .distinct()
+            .toList();
+
+        // Only a transition's target counts: a status nothing leads to is one no issue can occupy.
+        List<String> reachableStatusIds = transitionRepository.findByWorkflowIdIn(workflowIds).stream()
+            .map(Transition::getToStatusId)
+            .distinct()
+            .toList();
+
+        return statusRepository.findAllById(reachableStatusIds).stream()
+            .map(Status::getCategory)
+            .collect(Collectors.toCollection(() -> EnumSet.noneOf(StatusCategory.class)));
     }
 
     /** The status a newly-created issue lands in — the target of the create (null-from) transition. */
@@ -61,6 +92,11 @@ public class WorkflowResolver {
     /** The legal moves out of a status — the "available transitions" the detail view offers. */
     public List<Transition> availableTransitions(String workflowId, String fromStatusId) {
         return transitionRepository.findByWorkflowIdAndFromStatusId(workflowId, fromStatusId);
+    }
+
+    private WorkflowScheme requireScheme(String workflowSchemeId) {
+        return workflowSchemeRepository.findById(workflowSchemeId)
+            .orElseThrow(() -> new ResourceNotFoundException("Workflow scheme not found: " + workflowSchemeId));
     }
 
     public Status requireStatus(String statusId) {
