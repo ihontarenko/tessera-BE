@@ -123,6 +123,13 @@ public class BoardColumnService {
         Board board = requireAdminister(jwt, projectId);
         BoardColumn column = requireColumn(columnId, board.getId());
 
+        // Switching this column onto a *different* category would otherwise strip its current one with
+        // nobody left to take over — vacate it onto a sibling first (409 if none can), same rule delete/
+        // clear enforce, so a column can never carry away its category's only fallback home unnoticed.
+        if (column.getFallbackForCategory() != null && column.getFallbackForCategory() != request.category()) {
+            reassignFallbackAwayFrom(board.getId(), column);
+        }
+
         boardColumnRepository.findByBoardIdAndFallbackForCategory(board.getId(), request.category())
             .filter(holder -> !holder.getId().equals(column.getId()))
             .ifPresent(holder -> holder.setFallbackForCategory(null));
