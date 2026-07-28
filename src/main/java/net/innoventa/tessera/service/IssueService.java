@@ -14,7 +14,6 @@ import net.innoventa.tessera.repository.CommentRepository;
 import net.innoventa.tessera.repository.IssueLabelRepository;
 import net.innoventa.tessera.repository.IssueLinkRepository;
 import net.innoventa.tessera.repository.IssueRepository;
-import net.innoventa.tessera.repository.IssueTypeRepository;
 import net.innoventa.tessera.repository.PriorityRepository;
 import net.innoventa.tessera.security.Permissions;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -44,13 +43,13 @@ public class IssueService {
     static final String FIELD_CREATED = "created";
 
     private final IssueRepository issueRepository;
-    private final IssueTypeRepository issueTypeRepository;
     private final PriorityRepository priorityRepository;
     private final IssueLabelRepository issueLabelRepository;
     private final IssueLinkRepository issueLinkRepository;
     private final CommentRepository commentRepository;
 
     private final ProjectService projectService;
+    private final ProjectIssueTypeService projectIssueTypeService;
     private final ProjectPermissionService projectPermissionService;
     private final MemberService memberService;
     private final WorkflowResolver workflowResolver;
@@ -68,7 +67,10 @@ public class IssueService {
         Project project = projectService.requireProject(projectId);
         projectPermissionService.require(caller, projectId, Permissions.CREATE_ISSUE);
 
-        requireIssueType(request.issueTypeId());
+        // The scheme is a constraint, not a suggestion: the dialog offers only what it grants, and a
+        // caller reaching the API directly is held to the same list. Before the key is allocated, so a
+        // refused create never burns a number out of the project's sequence.
+        projectIssueTypeService.requireCreatable(project, request.issueTypeId());
         requirePriority(request.priorityId());
 
         String assigneeMemberId = resolveAssignee(caller, projectId, request.assigneeMemberId());
@@ -237,12 +239,6 @@ public class IssueService {
         return issueRepository.findFirstByProjectIdOrderByRankDesc(projectId)
             .map(last -> rankService.rankAfter(last.getRank()))
             .orElseGet(rankService::initialRank);
-    }
-
-    private void requireIssueType(String issueTypeId) {
-        if (!issueTypeRepository.existsById(issueTypeId)) {
-            throw new ResourceNotFoundException("Issue type not found: " + issueTypeId);
-        }
     }
 
     private void requirePriority(String priorityId) {

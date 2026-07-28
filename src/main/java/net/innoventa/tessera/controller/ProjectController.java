@@ -3,8 +3,10 @@ package net.innoventa.tessera.controller;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import net.innoventa.tessera.dto.project.CreateProjectRequest;
+import net.innoventa.tessera.dto.project.ProjectIssueTypesResponse;
 import net.innoventa.tessera.dto.project.ProjectResponse;
 import net.innoventa.tessera.dto.project.UpdateProjectRequest;
+import net.innoventa.tessera.service.ProjectIssueTypeService;
 import net.innoventa.tessera.service.ProjectService;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -26,6 +28,7 @@ import java.util.List;
 public class ProjectController {
 
     private final ProjectService projectService;
+    private final ProjectIssueTypeService projectIssueTypeService;
 
     @PostMapping
     @ResponseStatus(HttpStatus.CREATED)
@@ -41,6 +44,16 @@ public class ProjectController {
     @GetMapping("/{projectId}")
     public ProjectResponse get(@AuthenticationPrincipal Jwt jwt, @PathVariable String projectId) {
         return projectService.get(jwt, projectId);
+    }
+
+    /**
+     * The issue types this project may create. Project-scoped on purpose: the global
+     * {@code /api/configuration} catalog still lists every type that exists, which is the wrong list to
+     * raise an issue from once a project's scheme narrows it.
+     */
+    @GetMapping("/{projectId}/issue-types")
+    public ProjectIssueTypesResponse issueTypes(@AuthenticationPrincipal Jwt jwt, @PathVariable String projectId) {
+        return projectIssueTypeService.listCreatableIssueTypes(jwt, projectId);
     }
 
     @PutMapping("/{projectId}")

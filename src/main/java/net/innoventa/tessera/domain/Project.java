@@ -7,10 +7,13 @@ import java.time.LocalDateTime;
 
 /**
  * The top-level container of work (ADR-0002 — nothing above it; no workspace/organization column).
- * Owns a short uppercase {@code key} (e.g. TIC), a {@code lead}, a {@code type}, and points at one
+ * Owns a short uppercase {@code key} (e.g. TIC) and a {@code lead}, and points at one
  * {@link IssueTypeScheme} and one {@link WorkflowScheme}. {@code keyStrategy}/{@code keyPattern} select
  * the per-project issue-key algorithm (ADR-0003); Phase 1 always seeds the default prefixed-sequence
  * strategy. Visibility is membership-based ({@link ProjectMembership}), not tenant-based.
+ * <p>
+ * There is deliberately no {@code type} column. Whether a project plans in sprints is
+ * {@link Board#getScopeStrategy()} and nothing else, so no second field can contradict it (ADR-0015).
  */
 @Entity
 @Table(name = "projects", uniqueConstraints = @UniqueConstraint(name = "uq_projects_key", columnNames = "project_key"))
@@ -32,10 +35,6 @@ public class Project {
 
     @Column(nullable = false, length = 128)
     private String name;
-
-    @Enumerated(EnumType.STRING)
-    @Column(nullable = false, length = 16)
-    private ProjectType type;
 
     @Column(name = "lead_member_id", nullable = false, length = 36)
     private String leadMemberId;

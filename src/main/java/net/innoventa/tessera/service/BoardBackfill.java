@@ -1,6 +1,7 @@
 package net.innoventa.tessera.service;
 
 import lombok.RequiredArgsConstructor;
+import net.innoventa.tessera.domain.BoardScopeStrategy;
 import net.innoventa.tessera.domain.Project;
 import net.innoventa.tessera.repository.BoardRepository;
 import net.innoventa.tessera.repository.ProjectRepository;
@@ -44,7 +45,10 @@ public class BoardBackfill implements ApplicationRunner {
             return;
         }
 
-        boardless.forEach(boardProvisioner::provision);
+        // ALL_ISSUES because a backfilled project never answered the sprint question: it predates the
+        // board feature entirely. That is the behaviour which predates sprints, and the honest reading
+        // of "we do not know that this project plans in sprints" — a team that does flips one setting.
+        boardless.forEach(project -> boardProvisioner.provision(project, BoardScopeStrategy.ALL_ISSUES));
         logger.info("Provisioned boards for {} pre-existing project(s)", boardless.size());
     }
 

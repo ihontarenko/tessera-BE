@@ -7,9 +7,9 @@ import java.time.LocalDateTime;
 
 /**
  * A first-class, auto-provisioned view onto a project's issues (ADR-0009) — exactly one per project
- * ({@code projectId} unique). It exists for every project type (SCRUM/KANBAN/TODO alike, no
- * {@code if (type == …)} branch): the type only decides which default <em>view</em> the UI shows, not
- * whether a board exists. The board holds board-wide view settings — the {@link SwimlaneStrategy}, the
+ * ({@code projectId} unique). Every project has one, with nothing to branch on — since ADR-0015 there
+ * is no project type, and this board's {@link BoardScopeStrategy} is the only thing that distinguishes
+ * a Scrum project from a Kanban one. The board holds board-wide view settings — the {@link SwimlaneStrategy}, the
  * {@link BoardScopeStrategy} deciding which issues it draws from, and an optional done-threshold —
  * while its ordered {@link BoardColumn}s carry the status→column mapping.
  * <p>
@@ -40,9 +40,9 @@ public class Board {
     private SwimlaneStrategy swimlaneStrategy;
 
     /**
-     * Which issues the board renders — the whole project or only the active sprint (ADR-0012). Seeded
-     * from the project type's preset and editable afterwards; this one field is the whole of "this
-     * project does Scrum", which is why nothing branches on {@link ProjectType}.
+     * Which issues the board renders — the whole project or only the active sprint (ADR-0012). Set at
+     * creation and editable afterwards; this one field is the whole of "this project does Scrum", and
+     * since ADR-0015 there is no project type left for it to disagree with.
      */
     @Enumerated(EnumType.STRING)
     @Column(name = "scope_strategy", nullable = false, length = 16)

@@ -7,7 +7,6 @@ import net.innoventa.tessera.domain.Member;
 import net.innoventa.tessera.domain.Project;
 import net.innoventa.tessera.domain.ProjectMembership;
 import net.innoventa.tessera.domain.ProjectRole;
-import net.innoventa.tessera.domain.ProjectTypeDefaultScheme;
 import net.innoventa.tessera.dto.MemberSummary;
 import net.innoventa.tessera.dto.project.CreateProjectRequest;
 import net.innoventa.tessera.dto.project.ProjectResponse;
@@ -21,7 +20,6 @@ import net.innoventa.tessera.repository.MemberRepository;
 import net.innoventa.tessera.repository.ProjectMembershipRepository;
 import net.innoventa.tessera.repository.ProjectRepository;
 import net.innoventa.tessera.repository.ProjectRoleRepository;
-import net.innoventa.tessera.repository.ProjectTypeDefaultSchemeRepository;
 import net.innoventa.tessera.repository.WorkflowSchemeRepository;
 import net.innoventa.tessera.security.Permissions;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -32,11 +30,15 @@ import java.util.List;
 import java.util.function.Supplier;
 
 /**
- * Project provisioning and administration. A project is seeded with the schemes its {@link
- * net.innoventa.tessera.domain.ProjectType} maps to (via {@link ProjectTypeDefaultScheme} — data, not
- * an {@code if (type == …)} branch), and the creator is added as an Administrator member. Listing is
- * membership-scoped (a member sees only projects they belong to); editing requires
- * {@code ADMINISTER_PROJECT}.
+ * Project provisioning and administration. A new project is seeded with the full default schemes and
+ * the creator is added as an Administrator member. Listing is membership-scoped (a member sees only
+ * projects they belong to); editing requires {@code ADMINISTER_PROJECT}.
+ * <p>
+ * Creation used to resolve its schemes through a type -> preset table. With the project type gone
+ * (ADR-0015) there is nothing to key that lookup on, so the defaults are simply named here. Both are
+ * ordinary schemes a project may change afterwards through {@link #update}; naming them is a starting
+ * point, not a classification. The lighter {@code scheme-issue-type-todo} / {@code workflow-todo} pair
+ * survives in the catalog and is reachable the same way.
  */
 @Service
 @RequiredArgsConstructor
@@ -44,9 +46,10 @@ public class ProjectService {
 
     private static final String DEFAULT_KEY_STRATEGY = "PREFIXED_SEQUENCE";
     private static final String ADMINISTRATOR_ROLE_NAME = "Administrator";
+    private static final String DEFAULT_ISSUE_TYPE_SCHEME_ID = "scheme-issue-type-default";
+    private static final String DEFAULT_WORKFLOW_SCHEME_ID = "scheme-workflow-default";
 
     private final ProjectRepository projectRepository;
-    private final ProjectTypeDefaultSchemeRepository projectTypeDefaultSchemeRepository;
     private final ProjectMembershipRepository membershipRepository;
     private final ProjectRoleRepository projectRoleRepository;
     private final IssueTypeSchemeRepository issueTypeSchemeRepository;
@@ -67,10 +70,6 @@ public class ProjectService {
             throw new BusinessRuleViolationException("Project key already in use: " + request.key());
         }
 
-        ProjectTypeDefaultScheme preset = projectTypeDefaultSchemeRepository.findById(request.type())
-            .orElseThrow(() -> new ResourceNotFoundException(
-                "No default schemes seeded for project type " + request.type()));
-
         String leadMemberId = request.leadMemberId() != null
             ? memberService.requireMember(request.leadMemberId()).getId()
             : creator.getId();
@@ -79,19 +78,18 @@ public class ProjectService {
             .id(idGenerator.get())
             .key(request.key())
             .name(request.name())
-            .type(request.type())
             .leadMemberId(leadMemberId)
-            .issueTypeSchemeId(preset.getIssueTypeSchemeId())
-            .workflowSchemeId(preset.getWorkflowSchemeId())
+            .issueTypeSchemeId(requireIssueTypeScheme(DEFAULT_ISSUE_TYPE_SCHEME_ID))
+            .workflowSchemeId(requireWorkflowScheme(DEFAULT_WORKFLOW_SCHEME_ID))
             .keyStrategy(DEFAULT_KEY_STRATEGY)
             .build());
 
         // Seed the per-project issue-key counter now, so issue creation never races to create it.
         issueKeyAllocator.initializeCounter(project.getId());
 
-        // Every project gets a board on creation — for any type, no `if (type == …)` branch (ADR-0009).
-        // Its scope strategy comes from the same type preset (ADR-0012), resolved inside the provisioner.
-        boardProvisioner.provision(project);
+        // Every project gets a board on creation (ADR-0009), scoped by the answer the caller gave —
+        // the single stored representation of "this project plans in sprints" (ADR-0015).
+        boardProvisioner.provision(project, request.boardScopeStrategy());
 
         ProjectRole administrator = projectRoleRepository.findByName(ADMINISTRATOR_ROLE_NAME)
             .orElseThrow(() -> new ResourceNotFoundException("Administrator role not seeded"));
@@ -187,7 +185,8 @@ public class ProjectService {
             .sorted()
             .toList();
 
-        // Whether this project plans in sprints is a property of its board, never of its type (ADR-0012).
+        // Whether this project plans in sprints — and therefore whether it reads as Scrum or Kanban —
+        // is a property of its board and of nothing else (ADR-0015).
         BoardScopeStrategy boardScopeStrategy = boardRepository.findByProjectId(project.getId())
             .map(Board::getScopeStrategy)
             .orElse(BoardScopeStrategy.ALL_ISSUES);
@@ -196,7 +195,6 @@ public class ProjectService {
             project.getId(),
             project.getKey(),
             project.getName(),
-            project.getType(),
             boardScopeStrategy,
             lead,
             issueTypeScheme,
