@@ -2,6 +2,7 @@ package net.innoventa.tessera.controller;
 
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import net.innoventa.tessera.dto.sprint.CompleteSprintRequest;
 import net.innoventa.tessera.dto.sprint.CreateSprintRequest;
 import net.innoventa.tessera.dto.sprint.SprintSummary;
 import net.innoventa.tessera.dto.sprint.StartSprintRequest;
@@ -78,6 +79,20 @@ public class SprintController {
         @RequestBody StartSprintRequest request
     ) {
         return sprintService.start(jwt, projectId, sprintId, request);
+    }
+
+    /**
+     * Closing carries an explicit destination for the unfinished work — the server never guesses whether
+     * it falls back to the backlog or rolls into a named sprint. One-way: there is no re-open.
+     */
+    @PostMapping("/api/projects/{projectId}/sprints/{sprintId}/complete")
+    public SprintSummary complete(
+        @AuthenticationPrincipal Jwt jwt,
+        @PathVariable String projectId,
+        @PathVariable String sprintId,
+        @Valid @RequestBody CompleteSprintRequest request
+    ) {
+        return sprintService.complete(jwt, projectId, sprintId, request);
     }
 
 }

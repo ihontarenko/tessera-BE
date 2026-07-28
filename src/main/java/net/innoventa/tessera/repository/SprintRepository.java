@@ -13,6 +13,13 @@ public interface SprintRepository extends JpaRepository<Sprint, String> {
 
     List<Sprint> findByProjectIdAndStateOrderByCreatedAtAsc(String projectId, SprintState state);
 
+    /**
+     * Velocity's series, oldest first — ordered by when each sprint actually ran rather than when it was
+     * created, since sprints are often planned out of the order they end up being started in. A closed
+     * sprint always has a {@code startedAt}: closing requires running, and running requires starting.
+     */
+    List<Sprint> findByProjectIdAndStateOrderByStartedAtAsc(String projectId, SprintState state);
+
     /** The project's running sprint — the "at most one ACTIVE per project" invariant's read side. */
     Optional<Sprint> findFirstByProjectIdAndState(String projectId, SprintState state);
 

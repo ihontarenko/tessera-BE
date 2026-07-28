@@ -152,6 +152,31 @@ public class SprintMembershipService {
     }
 
     /**
+     * Carry an unfinished issue out of a sprint that is closing, into {@code destination} or back to the
+     * product backlog when that is null.
+     * <p>
+     * Deliberately <strong>not</strong> {@link #moveToSprint}: the closing sprint's membership row is left
+     * exactly as it stands — not deleted, not marked removed — because that row <em>is</em> the sprint
+     * report, and a sprint that has ended should never rewrite what happened inside it. Nothing is needed
+     * to keep "at most one live membership" true either, since a {@code CLOSED} sprint's rows stop
+     * counting as a live commitment the moment the state changes.
+     * <p>
+     * A carried issue therefore ends up with one row per sprint — the join table is the membership
+     * history, and both sprints' reports read correctly. Every move is recorded on the issue's own
+     * history with whoever closed the sprint as the actor, so a bulk carry-over is as traceable as a
+     * manual drag.
+     */
+    @Transactional
+    public void carryOver(Issue issue, Sprint closingSprint, Sprint destination, Member actor) {
+        if (destination != null) {
+            join(destination, issue, actor);
+        }
+
+        activityLogService.record(issue.getId(), actor.getId(), activityLogService.changeSet()
+            .changed(FIELD_SPRINT, closingSprint.getName(), destination == null ? null : destination.getName()));
+    }
+
+    /**
      * Discard a sprint's membership rows outright — the deleting-a-{@code FUTURE}-sprint path, where the
      * sprint itself is about to disappear and its rows have nowhere left to point. Every issue still in
      * it records the departure first, so an abandoned plan is still visible in the issue's history; the

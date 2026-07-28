@@ -1,15 +1,20 @@
 package net.innoventa.tessera.service;
 
 import lombok.RequiredArgsConstructor;
+import net.innoventa.tessera.domain.IncompleteIssueDestination;
+import net.innoventa.tessera.domain.Issue;
 import net.innoventa.tessera.domain.Member;
 import net.innoventa.tessera.domain.Sprint;
+import net.innoventa.tessera.domain.SprintIssue;
 import net.innoventa.tessera.domain.SprintState;
+import net.innoventa.tessera.dto.sprint.CompleteSprintRequest;
 import net.innoventa.tessera.dto.sprint.CreateSprintRequest;
 import net.innoventa.tessera.dto.sprint.SprintSummary;
 import net.innoventa.tessera.dto.sprint.StartSprintRequest;
 import net.innoventa.tessera.dto.sprint.UpdateSprintRequest;
 import net.innoventa.tessera.exception.BusinessRuleViolationException;
 import net.innoventa.tessera.exception.ResourceNotFoundException;
+import net.innoventa.tessera.repository.IssueRepository;
 import net.innoventa.tessera.repository.SprintRepository;
 import net.innoventa.tessera.security.Permissions;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -40,6 +45,7 @@ import java.util.function.Supplier;
 public class SprintService {
 
     private final SprintRepository sprintRepository;
+    private final IssueRepository issueRepository;
     private final ProjectService projectService;
     private final ProjectPermissionService projectPermissionService;
     private final MemberService memberService;
@@ -133,6 +139,93 @@ public class SprintService {
         sprint.setEndDate(request.endDate());
 
         return SprintSummary.from(sprint);
+    }
+
+    /**
+     * Close a running sprint (Phase-3 ticket 05). What was finished stays recorded against the sprint it
+     * was finished in — the closed sprint's membership rows are not touched at all, because they are what
+     * the sprint report reads. Unfinished work ({@code resolution IS NULL}, ADR-0004 — never a status
+     * name) additionally gains a membership row in the destination the request names, so an issue that
+     * took two sprints is visibly in both.
+     * <p>
+     * The destination is explicit: the server does not guess whether unfinished work falls back to the
+     * backlog or rolls into a named sprint. The whole close runs in one transaction, so a failure partway
+     * leaves the sprint running and every membership untouched.
+     */
+    @Transactional
+    public SprintSummary complete(Jwt jwt, String projectId, String sprintId, CompleteSprintRequest request) {
+        Member caller = requireSprintManager(jwt, projectId);
+        Sprint sprint = requireSprintInProject(projectId, sprintId);
+
+        if (sprint.getState() != SprintState.ACTIVE) {
+            throw new BusinessRuleViolationException(
+                "Only a running sprint can be completed; '" + sprint.getName() + "' is " + sprint.getState());
+        }
+
+        Sprint destination = resolveDestination(projectId, request);
+
+        for (Issue issue : incompleteMembers(sprint)) {
+            sprintMembershipService.carryOver(issue, sprint, destination, caller);
+        }
+
+        // One-way: nothing reopens a closed sprint, so this is the last state this row ever holds.
+        sprint.setState(SprintState.CLOSED);
+        sprint.setCompletedAt(LocalDateTime.now());
+
+        return SprintSummary.from(sprint);
+    }
+
+    /**
+     * Where the unfinished work goes — null for the product backlog, or the named sprint it rolls into.
+     * A named destination must be a {@code FUTURE} sprint of <em>this</em> project; a closed, running,
+     * unknown or foreign one is refused with a {@code 409} rather than quietly falling back to the
+     * backlog, because a bad target means the caller is closing something other than what they think.
+     */
+    private Sprint resolveDestination(String projectId, CompleteSprintRequest request) {
+        if (request.moveIncompleteTo() != IncompleteIssueDestination.SPRINT) {
+            return null;
+        }
+
+        if (request.targetSprintId() == null) {
+            throw new BusinessRuleViolationException(
+                "Moving incomplete issues to a sprint requires naming which sprint");
+        }
+
+        Sprint destination = sprintRepository.findById(request.targetSprintId())
+            .filter(candidate -> candidate.getProjectId().equals(projectId))
+            .orElseThrow(() -> new BusinessRuleViolationException(
+                "No sprint of this project with id " + request.targetSprintId()));
+
+        if (destination.getState() != SprintState.FUTURE) {
+            throw new BusinessRuleViolationException("Incomplete issues can only move to a future sprint; '"
+                + destination.getName() + "' is " + destination.getState());
+        }
+
+        return destination;
+    }
+
+    /**
+     * The sprint's current members that are still open. An issue dropped out of the sprint earlier is not
+     * a member and is not carried anywhere; one finished inside the sprint stays exactly where it is.
+     */
+    private List<Issue> incompleteMembers(Sprint sprint) {
+        List<String> memberIssueIds = sprintMembershipService.currentMembers(sprint.getId()).stream()
+            .map(SprintIssue::getIssueId)
+            .toList();
+
+        return issueRepository.findAllById(memberIssueIds).stream()
+            .filter(issue -> issue.getResolutionId() == null)
+            .toList();
+    }
+
+    /**
+     * The project's finished sprints, oldest first — velocity's series (Phase-3 ticket 07). Running and
+     * future sprints are left out: a sprint measured mid-flight would report a commitment against work
+     * that has not had its time yet.
+     */
+    @Transactional(readOnly = true)
+    public List<Sprint> closedSprints(String projectId) {
+        return sprintRepository.findByProjectIdAndStateOrderByStartedAtAsc(projectId, SprintState.CLOSED);
     }
 
     /** The project's running sprint, if one is — the read side of the one-active-sprint invariant. */

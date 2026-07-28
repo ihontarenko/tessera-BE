@@ -94,6 +94,9 @@ public class BoardService {
         List<Issue> issues = loaded.issues();
         Catalogs catalogs = loaded.catalogs();
         Sprint activeSprint = loaded.activeSprint();
+        List<Issue> committed = issues.stream()
+            .filter(issue -> loaded.committedIssueIds().contains(issue.getId()))
+            .toList();
 
         ColumnMapping mapping = loadColumnMapping(board.getId());
         List<String> matchedCardIds = matchedCardIds(filter, issues, catalogs, loaded.caller());
@@ -116,7 +119,11 @@ public class BoardService {
             board.getSwimlaneStrategy(),
             board.getScopeStrategy(),
             board.getHideDoneOlderThanDays(),
-            activeSprint == null ? null : ActiveSprintView.from(activeSprint, LocalDate.now()),
+            activeSprint == null ? null : ActiveSprintView.from(
+                activeSprint,
+                LocalDate.now(),
+                (int) committed.stream().filter(issue -> issue.getResolutionId() != null).count(),
+                (int) committed.stream().filter(issue -> issue.getResolutionId() == null).count()),
             columnViews,
             cards,
             matchedCardIds
@@ -142,9 +149,17 @@ public class BoardService {
             ? sprintService.activeSprint(projectId).orElse(null)
             : null;
 
-        List<Issue> issues = issuesInScope(board, projectId, activeSprint);
+        // Read once and reused twice — the board's issue source narrows to it, and the header's
+        // done / not-done split is counted over it. An ALL_ISSUES board never asks.
+        Set<String> committedIssueIds = activeSprint == null
+            ? Set.of()
+            : sprintMembershipService.currentMembers(activeSprint.getId()).stream()
+                .map(SprintIssue::getIssueId)
+                .collect(Collectors.toSet());
 
-        return new LoadedBoard(caller, board, activeSprint, issues, loadCatalogs(issues));
+        List<Issue> issues = issuesInScope(board, projectId, activeSprint, committedIssueIds);
+
+        return new LoadedBoard(caller, board, activeSprint, committedIssueIds, issues, loadCatalogs(issues));
     }
 
     /**
@@ -175,6 +190,7 @@ public class BoardService {
         Member caller,
         Board board,
         Sprint activeSprint,
+        Set<String> committedIssueIds,
         List<Issue> issues,
         Catalogs catalogs
     ) {
@@ -190,7 +206,12 @@ public class BoardService {
      * Everything downstream — column resolution, WIP counts, swimlanes, quick filters, done-threshold
      * hiding — is untouched; only this set narrows.
      */
-    private List<Issue> issuesInScope(Board board, String projectId, Sprint activeSprint) {
+    private List<Issue> issuesInScope(
+        Board board,
+        String projectId,
+        Sprint activeSprint,
+        Set<String> committedIssueIds
+    ) {
         List<Issue> projectIssues = issueRepository.findByProjectIdOrderByRankAsc(projectId);
 
         if (board.getScopeStrategy() != BoardScopeStrategy.ACTIVE_SPRINT) {
@@ -200,10 +221,6 @@ public class BoardService {
         if (activeSprint == null) {
             return List.of();
         }
-
-        Set<String> committedIssueIds = sprintMembershipService.currentMembers(activeSprint.getId()).stream()
-            .map(SprintIssue::getIssueId)
-            .collect(Collectors.toSet());
 
         return projectIssues.stream()
             .filter(issue -> committedIssueIds.contains(issue.getId())

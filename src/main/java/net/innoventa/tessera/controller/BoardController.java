@@ -7,6 +7,7 @@ import net.innoventa.tessera.dto.board.BoardMoveRequest;
 import net.innoventa.tessera.dto.board.BoardResponse;
 import net.innoventa.tessera.dto.board.BoardSettingsView;
 import net.innoventa.tessera.dto.board.SetDoneThresholdRequest;
+import net.innoventa.tessera.dto.board.SetScopeStrategyRequest;
 import net.innoventa.tessera.dto.board.SetSwimlaneStrategyRequest;
 import net.innoventa.tessera.service.BoardMoveService;
 import net.innoventa.tessera.service.BoardService;
@@ -60,8 +61,8 @@ public class BoardController {
         return boardMoveService.move(jwt, projectId, request);
     }
 
-    /** Board-wide view settings, each set on its own so neither overwrites the other from a stale copy;
-     *  both require {@code ADMINISTER_PROJECT}. */
+    /** Board-wide view settings, each set on its own so none overwrites another from a stale copy; all
+     *  require {@code ADMINISTER_PROJECT}. */
     @PutMapping("/api/projects/{projectId}/board/settings/swimlane-strategy")
     public BoardSettingsView setSwimlaneStrategy(
         @AuthenticationPrincipal Jwt jwt,
@@ -78,6 +79,20 @@ public class BoardController {
         @Valid @RequestBody SetDoneThresholdRequest request
     ) {
         return boardSettingsService.setDoneThreshold(jwt, projectId, request);
+    }
+
+    /**
+     * Switch the project between Scrum and a board of everything (Phase-3 ticket 08). Its own endpoint
+     * rather than a field on a combined update, for the reason above — and the change is a view change
+     * only: no sprint is started, closed or touched by it.
+     */
+    @PutMapping("/api/projects/{projectId}/board/settings/scope-strategy")
+    public BoardSettingsView setScopeStrategy(
+        @AuthenticationPrincipal Jwt jwt,
+        @PathVariable String projectId,
+        @Valid @RequestBody SetScopeStrategyRequest request
+    ) {
+        return boardSettingsService.setScopeStrategy(jwt, projectId, request);
     }
 
 }
