@@ -16,7 +16,9 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * The backlog screen (Phase-3 tickets 02/03): one read for the whole thing, and one write for every
- * drag on it. Both are addressed by the same {@code {projectId}} the rest of the project API uses.
+ * drag on it. Both are addressed by the same {@code {projectId}} the rest of the project API uses, and
+ * neither is gated on the board's scope strategy — every project has a backlog (ADR-0016), so any
+ * project may be asked for its own.
  * <p>
  * The move returns the screen rather than the moved row, because a drag changes two panels' counts and
  * story-point totals — sending back the whole shape keeps the client from re-deriving them.

@@ -6,10 +6,13 @@ import lombok.*;
 /**
  * One ordered column of a {@link Board} (ADR-0010). A column maps N statuses through
  * {@link BoardColumnStatus}; a status not explicitly mapped falls into the column whose
- * {@code fallbackForCategory} equals the status's {@link StatusCategory}. The default board carries
- * three columns — one per category, each a fallback, with zero explicit mappings — so every issue
- * resolves by category. The invariant "exactly one fallback column per category always exists" keeps
- * auto-mapping total, so no issue ever falls off the board.
+ * {@code fallbackForCategory} equals the status's {@link StatusCategory}. A seeded board carries one
+ * such column per category its workflow can reach, with zero explicit mappings, so every issue resolves
+ * by category out of the box.
+ * <p>
+ * A category may also be backed by <em>no</em> column, which is how an administrator moves its statuses
+ * off the board and into the backlog (ADR-0016). At most one column holds a given category's fallback
+ * role; nothing requires that one does.
  * <p>
  * {@code minIssues}/{@code maxIssues} are soft WIP limits — stored and returned, enforced only
  * visually on the client (Phase-2 ticket 03).

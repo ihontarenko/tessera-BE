@@ -2,6 +2,7 @@ package net.innoventa.tessera.service;
 
 import lombok.RequiredArgsConstructor;
 import net.innoventa.tessera.domain.Board;
+import net.innoventa.tessera.domain.BoardScopeStrategy;
 import net.innoventa.tessera.domain.Issue;
 import net.innoventa.tessera.domain.IssueType;
 import net.innoventa.tessera.domain.Member;
@@ -9,6 +10,7 @@ import net.innoventa.tessera.domain.Priority;
 import net.innoventa.tessera.domain.Sprint;
 import net.innoventa.tessera.domain.SprintIssue;
 import net.innoventa.tessera.domain.SprintState;
+import net.innoventa.tessera.domain.Status;
 import net.innoventa.tessera.dto.MemberSummary;
 import net.innoventa.tessera.dto.backlog.BacklogIssueView;
 import net.innoventa.tessera.dto.backlog.BacklogPanelView;
@@ -20,6 +22,7 @@ import net.innoventa.tessera.repository.IssueRepository;
 import net.innoventa.tessera.repository.IssueTypeRepository;
 import net.innoventa.tessera.repository.MemberRepository;
 import net.innoventa.tessera.repository.PriorityRepository;
+import net.innoventa.tessera.repository.StatusRepository;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -37,13 +40,18 @@ import java.util.stream.Collectors;
  * total. Visibility is the membership gate every project-scoped read uses (non-member {@code 404},
  * member without {@code BROWSE_PROJECT} {@code 403}).
  * <p>
+ * <strong>Every project has one</strong> (ADR-0016). The scope strategy decides whether sprints exist,
+ * not whether a backlog does, so nothing here refuses to answer for a board showing all issues.
+ * <p>
  * What lands in the backlog list is exactly: planning units (ADR-0014), still open
- * ({@code resolution IS NULL}, ADR-0004 — never judged by status name), holding no live sprint
- * membership. That last clause is asked of {@link SprintMembershipService} rather than re-derived here,
- * which is the whole point of that service existing. Sub-tasks and epics are absent by construction.
+ * ({@code resolution IS NULL}, ADR-0004 — never judged by status name), that <strong>the board does not
+ * render</strong> — see {@link #boardRenders}. Board and backlog are complementary by construction, so
+ * an issue is on one or the other and never both. Sub-tasks and epics are absent by construction.
  * <p>
  * A sprint panel, by contrast, shows every current member <em>including</em> issues completed inside it
- * — a sprint's contents are what was committed, not what is left. Every list is ordered by the single
+ * — a sprint's contents are what was committed, not what is left. Membership is asked of
+ * {@link SprintMembershipService} rather than re-derived here, which is the whole point of that service
+ * existing, and only a sprint-planning project is asked at all. Every list is ordered by the single
  * global LexoRank (ADR-0006); the panels are disjoint slices of it, so interleaving across panels is
  * invisible.
  */
@@ -54,6 +62,7 @@ public class BacklogService {
 
     private final IssueRepository issueRepository;
     private final IssueTypeRepository issueTypeRepository;
+    private final StatusRepository statusRepository;
     private final PriorityRepository priorityRepository;
     private final MemberRepository memberRepository;
 
@@ -61,6 +70,7 @@ public class BacklogService {
     private final ProjectPermissionService projectPermissionService;
     private final MemberService memberService;
     private final BoardService boardService;
+    private final BoardColumnResolver boardColumnResolver;
     private final SprintMembershipService sprintMembershipService;
 
     public BacklogResponse getBacklog(Jwt jwt, String projectId) {
@@ -79,10 +89,17 @@ public class BacklogService {
      */
     BacklogResponse render(String projectId) {
         Board board = boardService.requireBoard(projectId);
+        boolean plansInSprints = board.getScopeStrategy() == BoardScopeStrategy.ACTIVE_SPRINT;
 
         List<Issue> issues = issueRepository.findByProjectIdOrderByRankAsc(projectId);
         Catalogs catalogs = loadCatalogs(issues);
-        Map<String, SprintIssue> liveMemberships = sprintMembershipService.liveMembershipsByIssue(projectId);
+        BoardService.ColumnMapping mapping = boardService.loadColumnMapping(board.getId());
+
+        // A board showing all issues has no sprint panels to fill, so it never asks about membership —
+        // and its backlog is decided by column mapping alone.
+        Map<String, SprintIssue> liveMemberships = plansInSprints
+            ? sprintMembershipService.liveMembershipsByIssue(projectId)
+            : Map.of();
 
         Map<String, List<Issue>> committedBySprint = new HashMap<>();
         List<Issue> backlog = new ArrayList<>();
@@ -95,12 +112,12 @@ public class BacklogService {
             SprintIssue membership = liveMemberships.get(issue.getId());
             if (membership != null) {
                 committedBySprint.computeIfAbsent(membership.getSprintId(), sprintId -> new ArrayList<>()).add(issue);
-            } else if (issue.getResolutionId() == null) {
+            } else if (issue.getResolutionId() == null && !boardRenders(board, issue, catalogs, mapping)) {
                 backlog.add(issue);
             }
         }
 
-        List<Sprint> openSprints = sprintMembershipService.openSprints(projectId);
+        List<Sprint> openSprints = plansInSprints ? sprintMembershipService.openSprints(projectId) : List.of();
 
         BacklogPanelView activePanel = openSprints.stream()
             .filter(sprint -> sprint.getState() == SprintState.ACTIVE)
@@ -120,6 +137,25 @@ public class BacklogService {
             futurePanels,
             BacklogPanelView.of(null, rows(backlog, catalogs))
         );
+    }
+
+    /**
+     * Does the board render this open, uncommitted planning unit? ADR-0016 makes the backlog the exact
+     * complement of that answer, so this one predicate <em>is</em> the membership rule.
+     * <p>
+     * An {@code ACTIVE_SPRINT} board draws only from the running sprint, so an issue that reached here —
+     * holding no live membership — is off it whatever its status. An {@code ALL_ISSUES} board draws from
+     * the whole project, so the only thing that can keep an issue off it is a status its columns map
+     * nowhere. That is why unmapping a status is the administrator's control over what the backlog
+     * contains, and why a freshly seeded board — every reachable status mapped — starts with none.
+     */
+    private boolean boardRenders(Board board, Issue issue, Catalogs catalogs, BoardService.ColumnMapping mapping) {
+        if (board.getScopeStrategy() == BoardScopeStrategy.ACTIVE_SPRINT) {
+            return false;
+        }
+
+        return boardColumnResolver.rendersStatus(
+            catalogs.statuses.get(issue.getStatusId()), mapping.columns(), mapping.statusToColumn());
     }
 
     private BacklogPanelView panel(Sprint sprint, Map<String, List<Issue>> committedBySprint, Catalogs catalogs) {
@@ -162,6 +198,7 @@ public class BacklogService {
 
         return new Catalogs(
             issueTypeRepository.findAll().stream().collect(Collectors.toMap(IssueType::getId, Function.identity())),
+            statusRepository.findAll().stream().collect(Collectors.toMap(Status::getId, Function.identity())),
             priorityRepository.findAll().stream().collect(Collectors.toMap(Priority::getId, Function.identity())),
             memberRepository.findAllById(memberIds).stream().collect(Collectors.toMap(Member::getId, Function.identity()))
         );
@@ -170,6 +207,7 @@ public class BacklogService {
     /** The small global catalogs a row references, batched once so no row costs a query. */
     private record Catalogs(
         Map<String, IssueType> types,
+        Map<String, Status> statuses,
         Map<String, Priority> priorities,
         Map<String, Member> members
     ) {

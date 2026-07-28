@@ -5,12 +5,10 @@ import net.innoventa.tessera.domain.Board;
 import net.innoventa.tessera.domain.BoardColumn;
 import net.innoventa.tessera.domain.BoardColumnStatus;
 import net.innoventa.tessera.domain.Status;
-import net.innoventa.tessera.domain.StatusCategory;
 import net.innoventa.tessera.dto.board.BoardColumnView;
 import net.innoventa.tessera.dto.board.CreateBoardColumnRequest;
 import net.innoventa.tessera.dto.board.SetColumnFallbackRequest;
 import net.innoventa.tessera.dto.board.UpdateBoardColumnRequest;
-import net.innoventa.tessera.exception.BusinessRuleViolationException;
 import net.innoventa.tessera.exception.ResourceNotFoundException;
 import net.innoventa.tessera.repository.BoardColumnRepository;
 import net.innoventa.tessera.repository.BoardColumnStatusRepository;
@@ -29,10 +27,12 @@ import java.util.function.Supplier;
  * it. Every mutation requires {@code ADMINISTER_PROJECT} — the shared gate in
  * {@link BoardService#requireAdministrableBoard}; reads (the board itself) stay in {@link BoardService}.
  * <p>
- * The one invariant every method here protects (ADR-0010): <strong>exactly one fallback column per
- * category always exists</strong>. Assigning a category's fallback role atomically strips it from
- * whichever column held it; clearing it, or deleting the column that holds it, is refused ({@code 409})
- * unless another column can immediately take over — never leaving a category homeless.
+ * The one invariant left is that a category has <strong>at most one</strong> fallback column: assigning
+ * the role atomically strips it from whichever column held it. It used to be <em>exactly</em> one
+ * (ADR-0010), with clearing the role — or deleting the column holding it — refused unless a sibling
+ * could take over. ADR-0016 drops that half: a category with no fallback column simply means the board
+ * does not render its statuses, and those issues are the backlog. Leaving a category off the board is
+ * the point of the control, so it is no longer something to defend against.
  */
 @Service
 @RequiredArgsConstructor
@@ -96,14 +96,15 @@ public class BoardColumnService {
         return toView(column);
     }
 
+    /**
+     * Remove a column, with its explicit status mappings. Whatever it was the fallback for is left
+     * without one, and whatever it explicitly mapped falls back by category — either way any status
+     * that now maps nowhere moves to the backlog rather than disappearing (ADR-0016).
+     */
     @Transactional
     public void delete(Jwt jwt, String projectId, String columnId) {
         Board board = boardService.requireAdministrableBoard(jwt, projectId);
         BoardColumn column = requireColumn(columnId, board.getId());
-
-        if (column.getFallbackForCategory() != null) {
-            reassignFallbackAwayFrom(board.getId(), column);
-        }
 
         boardColumnStatusRepository.deleteAll(boardColumnStatusRepository.findByBoardColumnId(columnId));
         boardColumnRepository.delete(column);
@@ -113,17 +114,15 @@ public class BoardColumnService {
         boardColumnRepository.saveAll(remaining);
     }
 
+    /**
+     * Make this column the category's fallback home, taking the role off whichever column held it —
+     * that swap is what keeps "at most one fallback per category" true. The category this column backed
+     * before is simply left without one, and its statuses move to the backlog.
+     */
     @Transactional
     public BoardColumnView setFallback(Jwt jwt, String projectId, String columnId, SetColumnFallbackRequest request) {
         Board board = boardService.requireAdministrableBoard(jwt, projectId);
         BoardColumn column = requireColumn(columnId, board.getId());
-
-        // Switching this column onto a *different* category would otherwise strip its current one with
-        // nobody left to take over — vacate it onto a sibling first (409 if none can), same rule delete/
-        // clear enforce, so a column can never carry away its category's only fallback home unnoticed.
-        if (column.getFallbackForCategory() != null && column.getFallbackForCategory() != request.category()) {
-            reassignFallbackAwayFrom(board.getId(), column);
-        }
 
         boardColumnRepository.findByBoardIdAndFallbackForCategory(board.getId(), request.category())
             .filter(holder -> !holder.getId().equals(column.getId()))
@@ -134,16 +133,16 @@ public class BoardColumnService {
         return toView(column);
     }
 
+    /**
+     * Stop this column being any category's fallback home. The category is then rendered by no column,
+     * which is how an administrator decides that its statuses belong in the backlog (ADR-0016) — the
+     * whole reason this no longer hunts for a successor.
+     */
     @Transactional
     public void clearFallback(Jwt jwt, String projectId, String columnId) {
         Board board = boardService.requireAdministrableBoard(jwt, projectId);
-        BoardColumn column = requireColumn(columnId, board.getId());
 
-        if (column.getFallbackForCategory() == null) {
-            return;
-        }
-
-        reassignFallbackAwayFrom(board.getId(), column);
+        requireColumn(columnId, board.getId()).setFallbackForCategory(null);
     }
 
     @Transactional
@@ -174,26 +173,6 @@ public class BoardColumnService {
             .orElseThrow(() -> new ResourceNotFoundException("Status is not explicitly mapped to this column"));
 
         boardColumnStatusRepository.delete(mapping);
-    }
-
-    /**
-     * Hand {@code column}'s fallback role to a sibling with no fallback role of its own — the only kind
-     * of sibling that can take it over without orphaning whichever category it already backs. No such
-     * sibling exists only when every column already backs a distinct category (the classic default
-     * 3-column-per-3-category board), which is exactly the "last fallback column" case the spec refuses.
-     */
-    private void reassignFallbackAwayFrom(String boardId, BoardColumn column) {
-        StatusCategory category = column.getFallbackForCategory();
-
-        BoardColumn successor = boardColumnRepository.findByBoardIdOrderByPositionAsc(boardId).stream()
-            .filter(candidate -> !candidate.getId().equals(column.getId()))
-            .filter(candidate -> candidate.getFallbackForCategory() == null)
-            .findFirst()
-            .orElseThrow(() -> new BusinessRuleViolationException(
-                "Cannot remove the last column backing the '" + category + "' category"));
-
-        successor.setFallbackForCategory(category);
-        column.setFallbackForCategory(null);
     }
 
     private int clamp(int position, int size) {
