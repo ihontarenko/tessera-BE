@@ -4,7 +4,6 @@ import lombok.RequiredArgsConstructor;
 import net.innoventa.tessera.domain.Board;
 import net.innoventa.tessera.domain.BoardColumn;
 import net.innoventa.tessera.domain.BoardColumnStatus;
-import net.innoventa.tessera.domain.Member;
 import net.innoventa.tessera.domain.Status;
 import net.innoventa.tessera.domain.StatusCategory;
 import net.innoventa.tessera.dto.board.BoardColumnView;
@@ -16,7 +15,6 @@ import net.innoventa.tessera.exception.ResourceNotFoundException;
 import net.innoventa.tessera.repository.BoardColumnRepository;
 import net.innoventa.tessera.repository.BoardColumnStatusRepository;
 import net.innoventa.tessera.repository.StatusRepository;
-import net.innoventa.tessera.security.Permissions;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -28,8 +26,8 @@ import java.util.function.Supplier;
 /**
  * Board column configuration (Phase-2 ticket 03) — create/rename/reorder/delete a column, set its soft
  * WIP limits, assign/clear which category it is the fallback for, and explicitly map/unmap a status onto
- * it. Every mutation requires {@code ADMINISTER_PROJECT}; reads (the board itself) stay in
- * {@link BoardService}.
+ * it. Every mutation requires {@code ADMINISTER_PROJECT} — the shared gate in
+ * {@link BoardService#requireAdministrableBoard}; reads (the board itself) stay in {@link BoardService}.
  * <p>
  * The one invariant every method here protects (ADR-0010): <strong>exactly one fallback column per
  * category always exists</strong>. Assigning a category's fallback role atomically strips it from
@@ -44,14 +42,11 @@ public class BoardColumnService {
     private final BoardColumnStatusRepository boardColumnStatusRepository;
     private final StatusRepository statusRepository;
     private final BoardService boardService;
-    private final ProjectService projectService;
-    private final ProjectPermissionService projectPermissionService;
-    private final MemberService memberService;
     private final Supplier<String> idGenerator;
 
     @Transactional
     public BoardColumnView create(Jwt jwt, String projectId, CreateBoardColumnRequest request) {
-        Board board = requireAdminister(jwt, projectId);
+        Board board = boardService.requireAdministrableBoard(jwt, projectId);
         List<BoardColumn> columns = boardColumnRepository.findByBoardIdOrderByPositionAsc(board.getId());
 
         int insertAt = request.position() == null ? columns.size() : clamp(request.position(), columns.size());
@@ -76,7 +71,7 @@ public class BoardColumnService {
 
     @Transactional
     public BoardColumnView update(Jwt jwt, String projectId, String columnId, UpdateBoardColumnRequest request) {
-        Board board = requireAdminister(jwt, projectId);
+        Board board = boardService.requireAdministrableBoard(jwt, projectId);
         BoardColumn column = requireColumn(columnId, board.getId());
 
         column.setName(request.name());
@@ -88,7 +83,7 @@ public class BoardColumnService {
 
     @Transactional
     public BoardColumnView reorder(Jwt jwt, String projectId, String columnId, int newPosition) {
-        Board board = requireAdminister(jwt, projectId);
+        Board board = boardService.requireAdministrableBoard(jwt, projectId);
         BoardColumn column = requireColumn(columnId, board.getId());
 
         List<BoardColumn> columns = new ArrayList<>(
@@ -103,7 +98,7 @@ public class BoardColumnService {
 
     @Transactional
     public void delete(Jwt jwt, String projectId, String columnId) {
-        Board board = requireAdminister(jwt, projectId);
+        Board board = boardService.requireAdministrableBoard(jwt, projectId);
         BoardColumn column = requireColumn(columnId, board.getId());
 
         if (column.getFallbackForCategory() != null) {
@@ -120,7 +115,7 @@ public class BoardColumnService {
 
     @Transactional
     public BoardColumnView setFallback(Jwt jwt, String projectId, String columnId, SetColumnFallbackRequest request) {
-        Board board = requireAdminister(jwt, projectId);
+        Board board = boardService.requireAdministrableBoard(jwt, projectId);
         BoardColumn column = requireColumn(columnId, board.getId());
 
         // Switching this column onto a *different* category would otherwise strip its current one with
@@ -141,7 +136,7 @@ public class BoardColumnService {
 
     @Transactional
     public void clearFallback(Jwt jwt, String projectId, String columnId) {
-        Board board = requireAdminister(jwt, projectId);
+        Board board = boardService.requireAdministrableBoard(jwt, projectId);
         BoardColumn column = requireColumn(columnId, board.getId());
 
         if (column.getFallbackForCategory() == null) {
@@ -153,7 +148,7 @@ public class BoardColumnService {
 
     @Transactional
     public void mapStatus(Jwt jwt, String projectId, String columnId, String statusId) {
-        Board board = requireAdminister(jwt, projectId);
+        Board board = boardService.requireAdministrableBoard(jwt, projectId);
         BoardColumn column = requireColumn(columnId, board.getId());
         Status status = statusRepository.findById(statusId)
             .orElseThrow(() -> new ResourceNotFoundException("Status not found: " + statusId));
@@ -171,7 +166,7 @@ public class BoardColumnService {
 
     @Transactional
     public void unmapStatus(Jwt jwt, String projectId, String columnId, String statusId) {
-        Board board = requireAdminister(jwt, projectId);
+        Board board = boardService.requireAdministrableBoard(jwt, projectId);
         requireColumn(columnId, board.getId());
 
         BoardColumnStatus mapping = boardColumnStatusRepository.findByBoardIdAndStatusId(board.getId(), statusId)
@@ -216,13 +211,6 @@ public class BoardColumnService {
             .map(BoardColumnStatus::getStatusId)
             .toList();
         return BoardColumnView.from(column, explicitStatusIds);
-    }
-
-    private Board requireAdminister(Jwt jwt, String projectId) {
-        Member caller = memberService.resolveMember(jwt);
-        projectService.requireProject(projectId);
-        projectPermissionService.require(caller, projectId, Permissions.ADMINISTER_PROJECT);
-        return boardService.requireBoard(projectId);
     }
 
     private BoardColumn requireColumn(String columnId, String boardId) {

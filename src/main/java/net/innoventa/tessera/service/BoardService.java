@@ -25,6 +25,7 @@ import net.innoventa.tessera.repository.IssueTypeRepository;
 import net.innoventa.tessera.repository.MemberRepository;
 import net.innoventa.tessera.repository.PriorityRepository;
 import net.innoventa.tessera.repository.StatusRepository;
+import net.innoventa.tessera.security.Permissions;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -62,6 +63,7 @@ public class BoardService {
     private final ProjectPermissionService projectPermissionService;
     private final MemberService memberService;
     private final BoardColumnResolver boardColumnResolver;
+    private final EpicResolver epicResolver;
 
     public BoardResponse getBoard(Jwt jwt, String projectId) {
         Member caller = memberService.resolveMember(jwt);
@@ -100,6 +102,19 @@ public class BoardService {
     public Board requireBoard(String projectId) {
         return boardRepository.findByProjectId(projectId)
             .orElseThrow(() -> new ResourceNotFoundException("Board not provisioned for project: " + projectId));
+    }
+
+    /**
+     * The project's board behind the {@code ADMINISTER_PROJECT} gate every board-configuration mutation
+     * shares — {@link BoardColumnService}'s column reshaping and {@link BoardSettingsService}'s view
+     * settings alike. A non-member gets a {@code 404} from {@link ProjectService#requireProject} /
+     * membership resolution, a member without the permission a {@code 403}.
+     */
+    public Board requireAdministrableBoard(Jwt jwt, String projectId) {
+        Member caller = memberService.resolveMember(jwt);
+        projectService.requireProject(projectId);
+        projectPermissionService.require(caller, projectId, Permissions.ADMINISTER_PROJECT);
+        return requireBoard(projectId);
     }
 
     /**
@@ -145,7 +160,9 @@ public class BoardService {
             columnId,
             issue.getRank(),
             issue.getAssigneeMemberId(),
-            issue.getPriorityId()
+            issue.getPriorityId(),
+            catalogs.epicKeys.get(issue.getId()),
+            issue.getResolvedAt()
         );
     }
 
@@ -164,20 +181,39 @@ public class BoardService {
             .distinct()
             .toList();
 
+        Map<String, IssueType> types = issueTypeRepository.findAll().stream()
+            .collect(Collectors.toMap(IssueType::getId, Function.identity()));
+
         return new Catalogs(
             statusRepository.findAll().stream().collect(Collectors.toMap(Status::getId, Function.identity())),
-            issueTypeRepository.findAll().stream().collect(Collectors.toMap(IssueType::getId, Function.identity())),
+            types,
             priorityRepository.findAll().stream().collect(Collectors.toMap(Priority::getId, Function.identity())),
-            memberRepository.findAllById(memberIds).stream().collect(Collectors.toMap(Member::getId, Function.identity()))
+            memberRepository.findAllById(memberIds).stream().collect(Collectors.toMap(Member::getId, Function.identity())),
+            epicResolver.resolveAll(issues, types, ancestorLookup(issues))
         );
     }
 
-    /** The batched global catalogs plus the members the board's cards reference — no per-card lookup. */
+    /**
+     * Ancestor lookup for the epic walk: the already-loaded slice first, the repository only for a
+     * parent outside it. A full-board render loads the whole project and a parent is always in the same
+     * project ({@link IssueHierarchyService#validateParent}), so the hot path never falls through —
+     * while the single-card render after a move, which loads one issue, still resolves correctly.
+     */
+    private Function<String, Issue> ancestorLookup(List<Issue> issues) {
+        Map<String, Issue> loaded = issues.stream().collect(Collectors.toMap(Issue::getId, Function.identity()));
+
+        return issueId -> loaded.containsKey(issueId)
+            ? loaded.get(issueId)
+            : issueRepository.findById(issueId).orElse(null);
+    }
+
+    /** The batched global catalogs plus the per-slice derivations the board's cards reference — no per-card lookup. */
     private record Catalogs(
         Map<String, Status> statuses,
         Map<String, IssueType> types,
         Map<String, Priority> priorities,
-        Map<String, Member> members
+        Map<String, Member> members,
+        Map<String, String> epicKeys
     ) {
     }
 
