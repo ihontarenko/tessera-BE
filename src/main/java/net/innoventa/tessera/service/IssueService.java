@@ -202,6 +202,34 @@ public class IssueService {
             .orElseThrow(() -> new ResourceNotFoundException("Issue not found: " + issueId));
     }
 
+    /**
+     * The issue an <em>issue key</em> names, provided it belongs to {@code projectId} — the lookup every
+     * drag-and-drop endpoint does, since a card and a backlog row are both addressed by key. An issue in
+     * another project is reported as not found rather than forbidden: a caller scoped to one project has
+     * no business learning that a key exists elsewhere.
+     */
+    @Transactional(readOnly = true)
+    public Issue requireIssueInProject(String issueKey, String projectId) {
+        Issue issue = issueRepository.findByIssueKey(issueKey)
+            .orElseThrow(() -> new ResourceNotFoundException("Issue not found: " + issueKey));
+
+        if (!issue.getProjectId().equals(projectId)) {
+            throw new ResourceNotFoundException("Issue not found: " + issueKey);
+        }
+
+        return issue;
+    }
+
+    /**
+     * The rank of the issue a drop landed next to, or null when that side of the list is open — the
+     * pair of bounds {@link RankService#between} takes. Shared by the board's move and the backlog's,
+     * which express a drop the same way: the two neighbours the member could actually see.
+     */
+    @Transactional(readOnly = true)
+    public String neighbourRank(String neighbourIssueKey, String projectId) {
+        return neighbourIssueKey == null ? null : requireIssueInProject(neighbourIssueKey, projectId).getRank();
+    }
+
     /** Setting an assignee additionally requires {@code ASSIGN_ISSUE}; the assignee must be a member. */
     private String resolveAssignee(Member caller, String projectId, String assigneeMemberId) {
         if (assigneeMemberId == null) {

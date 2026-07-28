@@ -92,6 +92,16 @@ public class ActivityLogService {
             return this;
         }
 
+        /**
+         * Record a change unconditionally, for a field whose display strings may coincide across
+         * genuinely different values — two sprints sharing a name, say. {@link #compare} would silently
+         * swallow that; the caller here already knows the change is real.
+         */
+        public ChangeSet changed(String field, String oldValue, String newValue) {
+            changes.add(new FieldChange(field, oldValue, newValue));
+            return this;
+        }
+
         /** Record an addition (no prior value) — for set-membership changes like adding a link. */
         public ChangeSet added(String field, String newValue) {
             changes.add(new FieldChange(field, null, newValue));

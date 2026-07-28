@@ -44,7 +44,7 @@ public class BoardBackfill implements ApplicationRunner {
             return;
         }
 
-        boardless.forEach(project -> boardProvisioner.provision(project.getId()));
+        boardless.forEach(boardProvisioner::provision);
         logger.info("Provisioned boards for {} pre-existing project(s)", boardless.size());
     }
 

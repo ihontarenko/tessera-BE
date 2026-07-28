@@ -1,5 +1,6 @@
 package net.innoventa.tessera.dto.project;
 
+import net.innoventa.tessera.domain.BoardScopeStrategy;
 import net.innoventa.tessera.domain.ProjectType;
 import net.innoventa.tessera.dto.MemberSummary;
 
@@ -9,12 +10,17 @@ import java.util.List;
 /**
  * A project as the caller sees it, including {@code myPermissions} — the caller's effective permission
  * names in this project — so the UI can hide or disable actions without a second round-trip.
+ * <p>
+ * {@code boardScopeStrategy} rides along for the same reason: it is what decides whether this project
+ * shows a Backlog at all (ADR-0012), and the frontend must never make that decision from {@code type}.
+ * Carrying it here keeps the project page from fetching the board just to lay out its tabs.
  */
 public record ProjectResponse(
     String id,
     String key,
     String name,
     ProjectType type,
+    BoardScopeStrategy boardScopeStrategy,
     MemberSummary lead,
     SchemeSummary issueTypeScheme,
     SchemeSummary workflowScheme,

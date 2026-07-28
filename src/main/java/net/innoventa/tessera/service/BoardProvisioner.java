@@ -3,10 +3,14 @@ package net.innoventa.tessera.service;
 import lombok.RequiredArgsConstructor;
 import net.innoventa.tessera.domain.Board;
 import net.innoventa.tessera.domain.BoardColumn;
+import net.innoventa.tessera.domain.BoardScopeStrategy;
+import net.innoventa.tessera.domain.Project;
+import net.innoventa.tessera.domain.ProjectTypeDefaultScheme;
 import net.innoventa.tessera.domain.StatusCategory;
 import net.innoventa.tessera.domain.SwimlaneStrategy;
 import net.innoventa.tessera.repository.BoardColumnRepository;
 import net.innoventa.tessera.repository.BoardRepository;
+import net.innoventa.tessera.repository.ProjectTypeDefaultSchemeRepository;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -19,7 +23,9 @@ import java.util.function.Supplier;
  * mappings (ADR-0010) — so a freshly seeded board shows every issue by category with zero
  * configuration. Provisioning is deliberately <strong>type-agnostic</strong>: every project gets a
  * board (a TODO project too; its default view is just the checklist), never an {@code if (type == …)}
- * branch.
+ * branch. The one thing the type does decide — whether the board renders the whole project or only the
+ * active sprint (ADR-0012) — is read from {@link ProjectTypeDefaultScheme}, the same data-driven preset
+ * that already supplies the schemes.
  * <p>
  * The single provisioning path shared by both project creation ({@link ProjectService}) and the
  * startup backfill of pre-existing projects ({@link BoardBackfill}). Idempotent: a project that already
@@ -33,6 +39,7 @@ public class BoardProvisioner {
 
     private final BoardRepository boardRepository;
     private final BoardColumnRepository boardColumnRepository;
+    private final ProjectTypeDefaultSchemeRepository projectTypeDefaultSchemeRepository;
     private final Supplier<String> idGenerator;
 
     /** The three default columns, in board order: one fallback column per status category. */
@@ -46,21 +53,33 @@ public class BoardProvisioner {
     );
 
     /**
-     * Provision the board for {@code projectId} if it has none, returning the existing or newly created
-     * board. Safe to call unconditionally — the {@code project_id} unique constraint plus this guard
-     * keep it one board per project.
+     * Provision {@code project}'s board if it has none, returning the existing or newly created board.
+     * Safe to call unconditionally — the {@code project_id} unique constraint plus this guard keep it
+     * one board per project.
      */
     @Transactional
-    public Board provision(String projectId) {
-        return boardRepository.findByProjectId(projectId).orElseGet(() -> seed(projectId));
+    public Board provision(Project project) {
+        return boardRepository.findByProjectId(project.getId()).orElseGet(() -> seed(project));
     }
 
-    private Board seed(String projectId) {
+    /**
+     * The scope strategy the project's type preset dictates. A type with no preset row falls back to
+     * {@code ALL_ISSUES} — the behaviour that predates sprints, and the safe reading of "we don't know
+     * that this project plans in sprints".
+     */
+    private BoardScopeStrategy scopeStrategyFor(Project project) {
+        return projectTypeDefaultSchemeRepository.findById(project.getType())
+            .map(ProjectTypeDefaultScheme::getBoardScopeStrategy)
+            .orElse(BoardScopeStrategy.ALL_ISSUES);
+    }
+
+    private Board seed(Project project) {
         Board board = boardRepository.save(Board.builder()
             .id(idGenerator.get())
-            .projectId(projectId)
+            .projectId(project.getId())
             .name(DEFAULT_BOARD_NAME)
             .swimlaneStrategy(SwimlaneStrategy.NONE)
+            .scopeStrategy(scopeStrategyFor(project))
             .hideDoneOlderThanDays(null)
             .build());
 

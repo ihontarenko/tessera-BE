@@ -4,15 +4,19 @@ import lombok.RequiredArgsConstructor;
 import net.innoventa.tessera.domain.Board;
 import net.innoventa.tessera.domain.BoardColumn;
 import net.innoventa.tessera.domain.BoardColumnStatus;
+import net.innoventa.tessera.domain.BoardScopeStrategy;
 import net.innoventa.tessera.domain.Issue;
 import net.innoventa.tessera.domain.Member;
 import net.innoventa.tessera.domain.Priority;
+import net.innoventa.tessera.domain.Sprint;
+import net.innoventa.tessera.domain.SprintIssue;
 import net.innoventa.tessera.domain.Status;
 import net.innoventa.tessera.domain.IssueType;
 import net.innoventa.tessera.dto.MemberSummary;
 import net.innoventa.tessera.dto.board.BoardCardView;
 import net.innoventa.tessera.dto.board.BoardColumnView;
 import net.innoventa.tessera.dto.board.BoardResponse;
+import net.innoventa.tessera.dto.sprint.ActiveSprintView;
 import net.innoventa.tessera.dto.issue.IssueTypeSummary;
 import net.innoventa.tessera.dto.issue.PrioritySummary;
 import net.innoventa.tessera.dto.issue.StatusSummary;
@@ -30,8 +34,10 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
+import java.util.Set;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -64,6 +70,8 @@ public class BoardService {
     private final MemberService memberService;
     private final BoardColumnResolver boardColumnResolver;
     private final EpicResolver epicResolver;
+    private final SprintService sprintService;
+    private final SprintMembershipService sprintMembershipService;
 
     public BoardResponse getBoard(Jwt jwt, String projectId) {
         Member caller = memberService.resolveMember(jwt);
@@ -73,7 +81,13 @@ public class BoardService {
         Board board = requireBoard(projectId);
         ColumnMapping mapping = loadColumnMapping(board.getId());
 
-        List<Issue> issues = issueRepository.findByProjectIdOrderByRankAsc(projectId);
+        // Only a sprint-scoped board asks about sprints at all, so an ALL_ISSUES board renders through
+        // exactly the code path it did before this phase — one fewer query, and no behaviour to regress.
+        Sprint activeSprint = board.getScopeStrategy() == BoardScopeStrategy.ACTIVE_SPRINT
+            ? sprintService.activeSprint(projectId).orElse(null)
+            : null;
+
+        List<Issue> issues = issuesInScope(board, projectId, activeSprint);
         Catalogs catalogs = loadCatalogs(issues);
 
         List<BoardCardView> cards = issues.stream()
@@ -92,10 +106,43 @@ public class BoardService {
             board.getProjectId(),
             board.getName(),
             board.getSwimlaneStrategy(),
+            board.getScopeStrategy(),
             board.getHideDoneOlderThanDays(),
+            activeSprint == null ? null : ActiveSprintView.from(activeSprint, LocalDate.now()),
             columnViews,
             cards
         );
+    }
+
+    /**
+     * The issues the board draws from — the single thing a scope strategy changes (ADR-0012).
+     * {@code ALL_ISSUES} is the whole project, exactly as before sprints existed. {@code ACTIVE_SPRINT}
+     * narrows to the running sprint's current members plus <em>their sub-tasks</em>: a sub-task is never
+     * separately committed but it is not invisible either, so it rides onto the board on its parent's
+     * commitment (ADR-0014). With no sprint running the board holds nothing — zero cards, not an error.
+     * <p>
+     * Everything downstream — column resolution, WIP counts, swimlanes, quick filters, done-threshold
+     * hiding — is untouched; only this set narrows.
+     */
+    private List<Issue> issuesInScope(Board board, String projectId, Sprint activeSprint) {
+        List<Issue> projectIssues = issueRepository.findByProjectIdOrderByRankAsc(projectId);
+
+        if (board.getScopeStrategy() != BoardScopeStrategy.ACTIVE_SPRINT) {
+            return projectIssues;
+        }
+
+        if (activeSprint == null) {
+            return List.of();
+        }
+
+        Set<String> committedIssueIds = sprintMembershipService.currentMembers(activeSprint.getId()).stream()
+            .map(SprintIssue::getIssueId)
+            .collect(Collectors.toSet());
+
+        return projectIssues.stream()
+            .filter(issue -> committedIssueIds.contains(issue.getId())
+                || committedIssueIds.contains(issue.getParentId()))
+            .toList();
     }
 
     /** The board entity for a project, or {@code 404} — shared with {@link BoardMoveService}. */

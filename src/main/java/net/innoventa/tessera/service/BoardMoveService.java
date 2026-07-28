@@ -12,7 +12,6 @@ import net.innoventa.tessera.dto.board.BoardMoveRequest;
 import net.innoventa.tessera.dto.issue.TransitionIssueRequest;
 import net.innoventa.tessera.exception.BusinessRuleViolationException;
 import net.innoventa.tessera.exception.ResourceNotFoundException;
-import net.innoventa.tessera.repository.IssueRepository;
 import net.innoventa.tessera.repository.StatusRepository;
 import net.innoventa.tessera.security.Permissions;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -37,8 +36,8 @@ import java.util.List;
 @RequiredArgsConstructor
 public class BoardMoveService {
 
-    private final IssueRepository issueRepository;
     private final StatusRepository statusRepository;
+    private final IssueService issueService;
     private final ProjectService projectService;
     private final ProjectPermissionService projectPermissionService;
     private final MemberService memberService;
@@ -54,7 +53,7 @@ public class BoardMoveService {
         Project project = projectService.requireProject(projectId);
         projectPermissionService.requireVisible(caller.getId(), projectId);
 
-        Issue issue = requireIssueInProject(request.issueKey(), projectId);
+        Issue issue = issueService.requireIssueInProject(request.issueKey(), projectId);
         Board board = boardService.requireBoard(projectId);
         BoardService.ColumnMapping mapping = boardService.loadColumnMapping(board.getId());
         BoardColumn targetColumn = requireColumn(request.targetColumnId(), mapping.columns());
@@ -71,9 +70,9 @@ public class BoardMoveService {
             transitionService.transition(jwt, issue.getId(), new TransitionIssueRequest(targetStatus.getId(), request.resolutionId()));
         }
 
-        String beforeRank = resolveNeighbourRank(request.beforeIssueKey(), projectId);
-        String afterRank = resolveNeighbourRank(request.afterIssueKey(), projectId);
-        issue.setRank(rankService.between(beforeRank, afterRank));
+        issue.setRank(rankService.between(
+            issueService.neighbourRank(request.beforeIssueKey(), projectId),
+            issueService.neighbourRank(request.afterIssueKey(), projectId)));
 
         return boardService.cardView(issue, mapping);
     }
@@ -93,26 +92,11 @@ public class BoardMoveService {
                 "No legal transition into column '" + targetColumn.getName() + "' from the issue's current status"));
     }
 
-    private String resolveNeighbourRank(String neighbourIssueKey, String projectId) {
-        return neighbourIssueKey == null ? null : requireIssueInProject(neighbourIssueKey, projectId).getRank();
-    }
-
     private BoardColumn requireColumn(String columnId, List<BoardColumn> columns) {
         return columns.stream()
             .filter(column -> column.getId().equals(columnId))
             .findFirst()
             .orElseThrow(() -> new ResourceNotFoundException("Board column not found: " + columnId));
-    }
-
-    private Issue requireIssueInProject(String issueKey, String projectId) {
-        Issue issue = issueRepository.findByIssueKey(issueKey)
-            .orElseThrow(() -> new ResourceNotFoundException("Issue not found: " + issueKey));
-
-        if (!issue.getProjectId().equals(projectId)) {
-            throw new ResourceNotFoundException("Issue not found: " + issueKey);
-        }
-
-        return issue;
     }
 
 }

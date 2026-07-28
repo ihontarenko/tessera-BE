@@ -1,6 +1,8 @@
 package net.innoventa.tessera.service;
 
 import lombok.RequiredArgsConstructor;
+import net.innoventa.tessera.domain.Board;
+import net.innoventa.tessera.domain.BoardScopeStrategy;
 import net.innoventa.tessera.domain.Member;
 import net.innoventa.tessera.domain.Project;
 import net.innoventa.tessera.domain.ProjectMembership;
@@ -13,6 +15,7 @@ import net.innoventa.tessera.dto.project.SchemeSummary;
 import net.innoventa.tessera.dto.project.UpdateProjectRequest;
 import net.innoventa.tessera.exception.BusinessRuleViolationException;
 import net.innoventa.tessera.exception.ResourceNotFoundException;
+import net.innoventa.tessera.repository.BoardRepository;
 import net.innoventa.tessera.repository.IssueTypeSchemeRepository;
 import net.innoventa.tessera.repository.MemberRepository;
 import net.innoventa.tessera.repository.ProjectMembershipRepository;
@@ -49,6 +52,7 @@ public class ProjectService {
     private final IssueTypeSchemeRepository issueTypeSchemeRepository;
     private final WorkflowSchemeRepository workflowSchemeRepository;
     private final MemberRepository memberRepository;
+    private final BoardRepository boardRepository;
     private final MemberService memberService;
     private final ProjectPermissionService projectPermissionService;
     private final IssueKeyAllocator issueKeyAllocator;
@@ -86,7 +90,8 @@ public class ProjectService {
         issueKeyAllocator.initializeCounter(project.getId());
 
         // Every project gets a board on creation — for any type, no `if (type == …)` branch (ADR-0009).
-        boardProvisioner.provision(project.getId());
+        // Its scope strategy comes from the same type preset (ADR-0012), resolved inside the provisioner.
+        boardProvisioner.provision(project);
 
         ProjectRole administrator = projectRoleRepository.findByName(ADMINISTRATOR_ROLE_NAME)
             .orElseThrow(() -> new ResourceNotFoundException("Administrator role not seeded"));
@@ -182,11 +187,17 @@ public class ProjectService {
             .sorted()
             .toList();
 
+        // Whether this project plans in sprints is a property of its board, never of its type (ADR-0012).
+        BoardScopeStrategy boardScopeStrategy = boardRepository.findByProjectId(project.getId())
+            .map(Board::getScopeStrategy)
+            .orElse(BoardScopeStrategy.ALL_ISSUES);
+
         return new ProjectResponse(
             project.getId(),
             project.getKey(),
             project.getName(),
             project.getType(),
+            boardScopeStrategy,
             lead,
             issueTypeScheme,
             workflowScheme,

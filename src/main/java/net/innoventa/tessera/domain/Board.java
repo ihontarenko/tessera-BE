@@ -9,8 +9,9 @@ import java.time.LocalDateTime;
  * A first-class, auto-provisioned view onto a project's issues (ADR-0009) — exactly one per project
  * ({@code projectId} unique). It exists for every project type (SCRUM/KANBAN/TODO alike, no
  * {@code if (type == …)} branch): the type only decides which default <em>view</em> the UI shows, not
- * whether a board exists. The board holds board-wide view settings — the {@link SwimlaneStrategy} and
- * an optional done-threshold — while its ordered {@link BoardColumn}s carry the status→column mapping.
+ * whether a board exists. The board holds board-wide view settings — the {@link SwimlaneStrategy}, the
+ * {@link BoardScopeStrategy} deciding which issues it draws from, and an optional done-threshold —
+ * while its ordered {@link BoardColumn}s carry the status→column mapping.
  * <p>
  * Ids are stored flat, no JPA relations, matching the sibling entities.
  */
@@ -37,6 +38,15 @@ public class Board {
     @Enumerated(EnumType.STRING)
     @Column(name = "swimlane_strategy", nullable = false, length = 16)
     private SwimlaneStrategy swimlaneStrategy;
+
+    /**
+     * Which issues the board renders — the whole project or only the active sprint (ADR-0012). Seeded
+     * from the project type's preset and editable afterwards; this one field is the whole of "this
+     * project does Scrum", which is why nothing branches on {@link ProjectType}.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "scope_strategy", nullable = false, length = 16)
+    private BoardScopeStrategy scopeStrategy;
 
     /** Completed issues older than this many days drop off the board (Phase-2 ticket 06); null = never. */
     @Column(name = "hide_done_older_than_days")

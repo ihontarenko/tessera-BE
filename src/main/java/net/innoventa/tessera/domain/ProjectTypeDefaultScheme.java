@@ -31,4 +31,13 @@ public class ProjectTypeDefaultScheme {
     @Column(name = "workflow_scheme_id", nullable = false, length = 36)
     private String workflowSchemeId;
 
+    /**
+     * The scope strategy a new project's board is provisioned with (ADR-0012) — {@code SCRUM →
+     * ACTIVE_SPRINT}, everything else {@code ALL_ISSUES}. Data, so {@link net.innoventa.tessera.service.BoardProvisioner}
+     * needs no {@code if (type == SCRUM)} branch either.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "board_scope_strategy", nullable = false, length = 16)
+    private BoardScopeStrategy boardScopeStrategy;
+
 }
