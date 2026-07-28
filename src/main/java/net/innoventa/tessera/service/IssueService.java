@@ -11,12 +11,10 @@ import net.innoventa.tessera.dto.issue.IssueRowResponse;
 import net.innoventa.tessera.dto.issue.UpdateIssueRequest;
 import net.innoventa.tessera.exception.ResourceNotFoundException;
 import net.innoventa.tessera.repository.CommentRepository;
-import net.innoventa.tessera.repository.IssueComponentRepository;
 import net.innoventa.tessera.repository.IssueLabelRepository;
 import net.innoventa.tessera.repository.IssueLinkRepository;
 import net.innoventa.tessera.repository.IssueRepository;
 import net.innoventa.tessera.repository.IssueTypeRepository;
-import net.innoventa.tessera.repository.IssueVersionRepository;
 import net.innoventa.tessera.repository.PriorityRepository;
 import net.innoventa.tessera.security.Permissions;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -49,8 +47,6 @@ public class IssueService {
     private final IssueTypeRepository issueTypeRepository;
     private final PriorityRepository priorityRepository;
     private final IssueLabelRepository issueLabelRepository;
-    private final IssueComponentRepository issueComponentRepository;
-    private final IssueVersionRepository issueVersionRepository;
     private final IssueLinkRepository issueLinkRepository;
     private final CommentRepository commentRepository;
 
@@ -185,8 +181,6 @@ public class IssueService {
         issueRepository.findByParentIdOrderByRankAsc(issueId).forEach(child -> child.setParentId(null));
 
         issueLabelRepository.deleteByIssueId(issueId);
-        issueComponentRepository.deleteByIssueId(issueId);
-        issueVersionRepository.deleteByIssueId(issueId);
         issueLinkRepository.deleteAll(issueLinkRepository.findBySourceIssueId(issueId));
         issueLinkRepository.deleteAll(issueLinkRepository.findByTargetIssueId(issueId));
         commentRepository.deleteAll(commentRepository.findByIssueIdOrderByCreatedAtAsc(issueId));

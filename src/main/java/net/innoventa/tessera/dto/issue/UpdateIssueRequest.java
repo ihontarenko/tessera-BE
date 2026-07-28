@@ -9,7 +9,7 @@ import jakarta.validation.constraints.Size;
  * (ticket 07). Type is deliberately <strong>not</strong> editable here: it is fixed at creation, so a
  * later edit cannot silently break the hierarchy invariant against the issue's parent or children
  * (ticket 10). Status/resolution move through the workflow, parent through the hierarchy endpoint, and
- * labels/components/versions through the organization endpoint. A change to {@code assigneeMemberId}
+ * labels through the organization endpoint. A change to {@code assigneeMemberId}
  * additionally requires {@code ASSIGN_ISSUE}; the rest require {@code EDIT_ISSUE}.
  */
 public record UpdateIssueRequest(

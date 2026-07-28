@@ -152,7 +152,7 @@ class BoardServiceFilterTest {
     }
 
     /**
-     * The filter view-model, with its label/component/version/link joins, is the expensive half of a
+     * The filter view-model, with its label/link joins, is the expensive half of a
      * filtered render — an unfiltered board must not pay for it. This is a performance claim the
      * javadoc makes, so it is worth a test rather than a comment.
      */
@@ -255,7 +255,7 @@ class BoardServiceFilterTest {
         return new IssueFilterView(
             issue.getId(), issue.getIssueKey(), issue.getSummary(),
             null, null, null, null, null, null, null,
-            List.of(), List.of(), List.of(), List.of(),
+            List.of(), List.of(),
             null, null, null
         );
     }

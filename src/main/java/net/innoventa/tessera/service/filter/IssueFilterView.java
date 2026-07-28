@@ -35,8 +35,6 @@ public record IssueFilterView(
     MemberReference reporter,
     EpicReference epic,
     List<String> labels,
-    List<String> components,
-    List<String> versions,
     List<LinkReference> links,
     Instant createdAt,
     Instant updatedAt,

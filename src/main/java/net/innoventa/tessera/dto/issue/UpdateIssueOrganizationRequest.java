@@ -3,33 +3,17 @@ package net.innoventa.tessera.dto.issue;
 import java.util.List;
 
 /**
- * Replace an issue's organization associations in one call (ticket 11): free-text {@code labels}
- * (created on the fly), {@code componentIds}, and the two distinct version associations
- * {@code affectsVersionIds} and {@code fixVersionIds}. Each list is a full replacement of that
- * association; a null list is treated as empty. Components and versions must belong to the issue's
- * project. Requires {@code EDIT_ISSUE}.
+ * Replace an issue's labels in one call (ticket 11): free-text names, created on the fly. The list is a
+ * full replacement of the association rather than a delta, so the client sends the state it wants to
+ * end up with; a null list is treated as empty. Requires {@code EDIT_ISSUE}.
  */
 public record UpdateIssueOrganizationRequest(
-    List<String> labels,
-    List<String> componentIds,
-    List<String> affectsVersionIds,
-    List<String> fixVersionIds
+    List<String> labels
 ) {
 
-    public List<String> labelsOrEmpty() {
+    /** The requested labels, with a missing list read as "no labels" rather than left null. */
+    public List<String> resolveLabels() {
         return labels == null ? List.of() : labels;
-    }
-
-    public List<String> componentIdsOrEmpty() {
-        return componentIds == null ? List.of() : componentIds;
-    }
-
-    public List<String> affectsVersionIdsOrEmpty() {
-        return affectsVersionIds == null ? List.of() : affectsVersionIds;
-    }
-
-    public List<String> fixVersionIdsOrEmpty() {
-        return fixVersionIds == null ? List.of() : fixVersionIds;
     }
 
 }

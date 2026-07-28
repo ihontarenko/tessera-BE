@@ -27,7 +27,13 @@ final class BoardFixture {
 
     static final Member CALLER = Member.builder().id("member-1").displayName("Ivan").build();
 
-    /** Mine, open, in progress, a Highest bug, touched yesterday. */
+    /**
+     * Mine, open, in progress, a Highest bug, touched yesterday.
+     * <p>
+     * Its <em>single</em> label is load-bearing: {@code FilterGrammarReferenceTest} proves the
+     * documented {@code 'x' in list} pitfall against exactly this card, and that pitfall only bites a
+     * one-element list. Adding a second label here would leave the warning documented but unproven.
+     */
     static final IssueFilterView MINE = new IssueFilterView(
         "issue-1", "TIC-1", "Fix the Login page",
         new TypeReference("Bug", 0),
@@ -37,7 +43,7 @@ final class BoardFixture {
         member("member-1", "Ivan"),
         member("member-9", "Olena"),
         new EpicReference("TIC-42"),
-        List.of("regression"), List.of("api"), List.of("1.0"),
+        List.of("api"),
         List.of(),
         NOW.minusSeconds(days(30)), NOW.minusSeconds(days(1)), null
     );
@@ -52,7 +58,7 @@ final class BoardFixture {
         member("member-2", "Olena"),
         member("member-9", "Olena"),
         new EpicReference("TIC-42"),
-        List.of(), List.of(), List.of(),
+        List.of(),
         List.of(new LinkReference("Blocks", LinkReference.INWARD, "TIC-1")),
         NOW.minusSeconds(days(40)), NOW.minusSeconds(days(1)), null
     );
@@ -67,7 +73,7 @@ final class BoardFixture {
         null,
         member("member-1", "Ivan"),
         null,
-        List.of("regression", "flaky"), List.of(), List.of(),
+        List.of("regression", "flaky"),
         List.of(),
         NOW.minusSeconds(days(60)), NOW.minusSeconds(days(30)), null
     );
@@ -82,7 +88,7 @@ final class BoardFixture {
         member("member-1", "Ivan"),
         member("member-9", "Olena"),
         null,
-        List.of(), List.of(), List.of(),
+        List.of(),
         List.of(new LinkReference("Blocks", LinkReference.OUTWARD, "TIC-2")),
         NOW.minusSeconds(days(50)), NOW.minusSeconds(days(20)), NOW.minusSeconds(days(20))
     );

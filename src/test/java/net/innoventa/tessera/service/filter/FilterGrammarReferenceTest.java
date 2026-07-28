@@ -102,11 +102,11 @@ class FilterGrammarReferenceTest {
             .as("unbracketed `in` still mis-parses, so the warning stands")
             .isEmpty();
 
-        assertThat(evaluator.matchingIssueIds("'api' in issue.components", BOARD, CALLER, NOW))
+        assertThat(evaluator.matchingIssueIds("'api' in issue.labels", BOARD, CALLER, NOW))
             .as("single-element `in` still misbehaves, so the hasAny advice stands")
             .isEmpty();
 
-        assertThat(evaluator.matchingIssueIds("issue.components is hasAny(['api'])", BOARD, CALLER, NOW))
+        assertThat(evaluator.matchingIssueIds("issue.labels is hasAny(['api'])", BOARD, CALLER, NOW))
             .as("and the advised form works")
             .containsExactly("issue-1");
     }

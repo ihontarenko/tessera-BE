@@ -1,22 +1,18 @@
 package net.innoventa.tessera.service;
 
 import lombok.RequiredArgsConstructor;
-import net.innoventa.tessera.domain.Component;
 import net.innoventa.tessera.domain.Issue;
 import net.innoventa.tessera.domain.IssueType;
 import net.innoventa.tessera.domain.Member;
 import net.innoventa.tessera.domain.Priority;
 import net.innoventa.tessera.domain.Resolution;
 import net.innoventa.tessera.domain.Status;
-import net.innoventa.tessera.domain.Version;
-import net.innoventa.tessera.repository.ComponentRepository;
 import net.innoventa.tessera.repository.IssueRepository;
 import net.innoventa.tessera.repository.IssueTypeRepository;
 import net.innoventa.tessera.repository.MemberRepository;
 import net.innoventa.tessera.repository.PriorityRepository;
 import net.innoventa.tessera.repository.ResolutionRepository;
 import net.innoventa.tessera.repository.StatusRepository;
-import net.innoventa.tessera.repository.VersionRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -36,8 +32,6 @@ public class IssueCatalog {
     private final StatusRepository statusRepository;
     private final ResolutionRepository resolutionRepository;
     private final MemberRepository memberRepository;
-    private final ComponentRepository componentRepository;
-    private final VersionRepository versionRepository;
     private final IssueRepository issueRepository;
 
     public String typeName(String issueTypeId) {
@@ -63,16 +57,6 @@ public class IssueCatalog {
     public String memberName(String memberId) {
         return memberId == null ? null
             : memberRepository.findById(memberId).map(Member::getDisplayName).orElse(null);
-    }
-
-    public String componentName(String componentId) {
-        return componentId == null ? null
-            : componentRepository.findById(componentId).map(Component::getName).orElse(null);
-    }
-
-    public String versionName(String versionId) {
-        return versionId == null ? null
-            : versionRepository.findById(versionId).map(Version::getName).orElse(null);
     }
 
     public String issueKey(String issueId) {

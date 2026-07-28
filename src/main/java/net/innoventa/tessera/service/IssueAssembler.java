@@ -1,7 +1,6 @@
 package net.innoventa.tessera.service;
 
 import lombok.RequiredArgsConstructor;
-import net.innoventa.tessera.domain.Component;
 import net.innoventa.tessera.domain.Issue;
 import net.innoventa.tessera.domain.IssueLink;
 import net.innoventa.tessera.domain.IssueType;
@@ -12,10 +11,7 @@ import net.innoventa.tessera.domain.Project;
 import net.innoventa.tessera.domain.Resolution;
 import net.innoventa.tessera.domain.Status;
 import net.innoventa.tessera.domain.Transition;
-import net.innoventa.tessera.domain.Version;
-import net.innoventa.tessera.domain.VersionLinkKind;
 import net.innoventa.tessera.dto.MemberSummary;
-import net.innoventa.tessera.dto.issue.ComponentRef;
 import net.innoventa.tessera.dto.issue.IssueLinkView;
 import net.innoventa.tessera.dto.issue.IssueRef;
 import net.innoventa.tessera.dto.issue.IssueResponse;
@@ -26,22 +22,17 @@ import net.innoventa.tessera.dto.issue.PrioritySummary;
 import net.innoventa.tessera.dto.issue.ResolutionSummary;
 import net.innoventa.tessera.dto.issue.StatusSummary;
 import net.innoventa.tessera.dto.issue.TransitionOption;
-import net.innoventa.tessera.dto.issue.VersionRef;
 import net.innoventa.tessera.domain.StatusCategory;
-import net.innoventa.tessera.repository.ComponentRepository;
-import net.innoventa.tessera.repository.IssueComponentRepository;
 import net.innoventa.tessera.repository.IssueLabelRepository;
 import net.innoventa.tessera.repository.IssueLinkRepository;
 import net.innoventa.tessera.repository.IssueRepository;
 import net.innoventa.tessera.repository.IssueTypeRepository;
-import net.innoventa.tessera.repository.IssueVersionRepository;
 import net.innoventa.tessera.repository.LabelRepository;
 import net.innoventa.tessera.repository.LinkTypeRepository;
 import net.innoventa.tessera.repository.MemberRepository;
 import net.innoventa.tessera.repository.PriorityRepository;
 import net.innoventa.tessera.repository.ResolutionRepository;
 import net.innoventa.tessera.repository.StatusRepository;
-import net.innoventa.tessera.repository.VersionRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -54,7 +45,7 @@ import java.util.stream.Collectors;
  * Turns {@link Issue} entities into the API's row and detail shapes. Kept out of the mutation services
  * so they stay focused on writes; assembling is read-only and batches the small global catalogs into
  * maps to avoid a query per row. The detail shape additionally loads an issue's satellites (labels,
- * components, versions, links, children) and the workflow-legal transitions available from its status.
+ * links, children) and the workflow-legal transitions available from its status.
  */
 @Service
 @RequiredArgsConstructor
@@ -69,10 +60,6 @@ public class IssueAssembler {
     private final MemberRepository memberRepository;
     private final IssueLabelRepository issueLabelRepository;
     private final LabelRepository labelRepository;
-    private final IssueComponentRepository issueComponentRepository;
-    private final ComponentRepository componentRepository;
-    private final IssueVersionRepository issueVersionRepository;
-    private final VersionRepository versionRepository;
     private final IssueLinkRepository issueLinkRepository;
     private final LinkTypeRepository linkTypeRepository;
     private final WorkflowResolver workflowResolver;
@@ -120,16 +107,6 @@ public class IssueAssembler {
             .sorted(String.CASE_INSENSITIVE_ORDER)
             .toList();
 
-        List<ComponentRef> components = issueComponentRepository.findByIssueId(issue.getId()).stream()
-            .map(issueComponent -> componentRepository.findById(issueComponent.getComponentId()).orElse(null))
-            .filter(component -> component != null)
-            .sorted((first, second) -> first.getName().compareToIgnoreCase(second.getName()))
-            .map(ComponentRef::from)
-            .toList();
-
-        List<VersionRef> affectsVersions = versionRefs(issue.getId(), VersionLinkKind.AFFECTS);
-        List<VersionRef> fixVersions = versionRefs(issue.getId(), VersionLinkKind.FIX);
-
         IssueRef parent = issue.getParentId() == null
             ? null
             : issueRepository.findById(issue.getParentId()).map(this::refOf).orElse(null);
@@ -157,23 +134,11 @@ public class IssueAssembler {
             issue.getStoryPoints(),
             issue.getRank(),
             labels,
-            components,
-            affectsVersions,
-            fixVersions,
             links(issue),
             availableTransitions(issue, project),
             issue.getCreatedAt(),
             issue.getUpdatedAt()
         );
-    }
-
-    private List<VersionRef> versionRefs(String issueId, VersionLinkKind kind) {
-        return issueVersionRepository.findByIssueIdAndLinkKind(issueId, kind).stream()
-            .map(issueVersion -> versionRepository.findById(issueVersion.getVersionId()).orElse(null))
-            .filter(version -> version != null)
-            .sorted((first, second) -> Integer.compare(first.getSequence(), second.getSequence()))
-            .map(VersionRef::from)
-            .toList();
     }
 
     private List<IssueLinkView> links(Issue issue) {

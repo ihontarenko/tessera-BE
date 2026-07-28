@@ -1,34 +1,26 @@
 package net.innoventa.tessera.service.filter;
 
 import lombok.RequiredArgsConstructor;
-import net.innoventa.tessera.domain.Component;
 import net.innoventa.tessera.domain.Issue;
-import net.innoventa.tessera.domain.IssueComponent;
 import net.innoventa.tessera.domain.IssueLabel;
 import net.innoventa.tessera.domain.IssueLink;
 import net.innoventa.tessera.domain.IssueType;
-import net.innoventa.tessera.domain.IssueVersion;
 import net.innoventa.tessera.domain.Label;
 import net.innoventa.tessera.domain.LinkType;
 import net.innoventa.tessera.domain.Member;
 import net.innoventa.tessera.domain.Priority;
 import net.innoventa.tessera.domain.Resolution;
 import net.innoventa.tessera.domain.Status;
-import net.innoventa.tessera.domain.Version;
-import net.innoventa.tessera.repository.ComponentRepository;
-import net.innoventa.tessera.repository.IssueComponentRepository;
 import net.innoventa.tessera.repository.IssueLabelRepository;
 import net.innoventa.tessera.repository.IssueLinkRepository;
 import net.innoventa.tessera.repository.IssueRepository;
 import net.innoventa.tessera.repository.IssueTypeRepository;
-import net.innoventa.tessera.repository.IssueVersionRepository;
 import net.innoventa.tessera.repository.LabelRepository;
 import net.innoventa.tessera.repository.LinkTypeRepository;
 import net.innoventa.tessera.repository.MemberRepository;
 import net.innoventa.tessera.repository.PriorityRepository;
 import net.innoventa.tessera.repository.ResolutionRepository;
 import net.innoventa.tessera.repository.StatusRepository;
-import net.innoventa.tessera.repository.VersionRepository;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
@@ -48,9 +40,9 @@ import java.util.stream.Stream;
  * Hydrates a slice of issues into the {@link IssueFilterView}s a predicate is evaluated against.
  * <p>
  * Every lookup is batched: the small global catalogs in one {@code findAll} each, the referenced
- * members and the label/component/version/link joins in one query per relation for the whole slice.
- * There is no per-issue query, and the whole factory only runs when a request actually carries a
- * filter — an unfiltered board render never pays for any of it.
+ * members and the label/link joins in one query per relation for the whole slice. There is no
+ * per-issue query, and the whole factory only runs when a request actually carries a filter — an
+ * unfiltered board render never pays for any of it.
  */
 @Service
 @RequiredArgsConstructor
@@ -63,10 +55,6 @@ public class IssueFilterViewFactory {
     private final MemberRepository         memberRepository;
     private final IssueLabelRepository     issueLabelRepository;
     private final LabelRepository          labelRepository;
-    private final IssueComponentRepository issueComponentRepository;
-    private final ComponentRepository      componentRepository;
-    private final IssueVersionRepository   issueVersionRepository;
-    private final VersionRepository        versionRepository;
     private final IssueLinkRepository      issueLinkRepository;
     private final LinkTypeRepository       linkTypeRepository;
     private final IssueRepository          issueRepository;
@@ -90,8 +78,6 @@ public class IssueFilterViewFactory {
         Map<String, Member> members = byId(memberRepository.findAllById(referencedMemberIds(issues)), Member::getId);
 
         Map<String, List<String>> labels = labelsByIssue(issueIds);
-        Map<String, List<String>> components = componentsByIssue(issueIds);
-        Map<String, List<String>> versions = versionsByIssue(issueIds);
         Map<String, List<IssueFilterView.LinkReference>> links = linksByIssue(issueIds);
 
         return issues.stream()
@@ -107,8 +93,6 @@ public class IssueFilterViewFactory {
                 memberReference(members.get(issue.getReporterMemberId())),
                 epicReference(epicKeys.get(issue.getId())),
                 labels.getOrDefault(issue.getId(), List.of()),
-                components.getOrDefault(issue.getId(), List.of()),
-                versions.getOrDefault(issue.getId(), List.of()),
                 links.getOrDefault(issue.getId(), List.of()),
                 instant(issue.getCreatedAt()),
                 instant(issue.getUpdatedAt()),
@@ -135,53 +119,30 @@ public class IssueFilterViewFactory {
             .toList();
     }
 
-    private Map<String, List<String>> labelsByIssue(Set<String> issueIds) {
-        return namesByIssue(
-            issueLabelRepository.findByIssueIdIn(issueIds),
-            IssueLabel::getIssueId, IssueLabel::getLabelId,
-            labelRepository::findAllById, Label::getId, Label::getName);
-    }
-
-    private Map<String, List<String>> componentsByIssue(Set<String> issueIds) {
-        return namesByIssue(
-            issueComponentRepository.findByIssueIdIn(issueIds),
-            IssueComponent::getIssueId, IssueComponent::getComponentId,
-            componentRepository::findAllById, Component::getId, Component::getName);
-    }
-
-    private Map<String, List<String>> versionsByIssue(Set<String> issueIds) {
-        return namesByIssue(
-            issueVersionRepository.findByIssueIdIn(issueIds),
-            IssueVersion::getIssueId, IssueVersion::getVersionId,
-            versionRepository::findAllById, Version::getId, Version::getName);
-    }
-
     /**
-     * The shape every name-valued relation shares: read the join rows for the slice, batch-load the
-     * catalog entries they point at, and group the names by issue. Labels, components and versions
-     * differ only in which repositories and accessors are handed in, so they are one method with three
-     * call sites rather than three copies that could drift apart.
-     *
-     * @param joins       the join rows for the whole slice, already fetched
-     * @param catalogById the batched catalog lookup — one query for every entry the joins reference
+     * The label names carried by the slice, grouped by issue: one query for the join rows, a second for
+     * the labels they point at, and nothing per-issue in between.
+     * <p>
+     * This was a generic helper while components and versions shared its shape. They are gone
+     * (ADR-0017), and labels is the only name-valued relation left, so the concrete form says the same
+     * thing without six functional parameters standing in for two field accesses.
      */
-    private <J, C> Map<String, List<String>> namesByIssue(
-        List<J> joins,
-        Function<J, String> issueIdOf,
-        Function<J, String> catalogIdOf,
-        Function<List<String>, Collection<C>> catalogById,
-        Function<C, String> catalogIdentity,
-        Function<C, String> catalogName
-    ) {
+    private Map<String, List<String>> labelsByIssue(Set<String> issueIds) {
+        List<IssueLabel> joins = issueLabelRepository.findByIssueIdIn(issueIds);
+
         if (joins.isEmpty()) {
             return Map.of();
         }
 
-        List<String> catalogIds = joins.stream().map(catalogIdOf).distinct().toList();
-        Map<String, C> catalog = byId(catalogById.apply(catalogIds), catalogIdentity);
+        Map<String, Label> labels = byId(
+            labelRepository.findAllById(joins.stream().map(IssueLabel::getLabelId).distinct().toList()),
+            Label::getId);
 
-        return groupNames(joins.stream()
-            .map(join -> new NameLink(issueIdOf.apply(join), name(catalog.get(catalogIdOf.apply(join)), catalogName))));
+        return joins.stream()
+            .filter(join -> labels.containsKey(join.getLabelId()))
+            .collect(Collectors.groupingBy(
+                IssueLabel::getIssueId,
+                Collectors.mapping(join -> labels.get(join.getLabelId()).getName(), Collectors.toList())));
     }
 
     /**
@@ -250,16 +211,6 @@ public class IssueFilterViewFactory {
             .collect(Collectors.toMap(Issue::getId, Issue::getIssueKey));
     }
 
-    private Map<String, List<String>> groupNames(Stream<NameLink> links) {
-        return links
-            .filter(link -> link.name() != null)
-            .collect(Collectors.groupingBy(NameLink::issueId, Collectors.mapping(NameLink::name, Collectors.toList())));
-    }
-
-    private <T> String name(T catalogEntry, Function<T, String> accessor) {
-        return catalogEntry == null ? null : accessor.apply(catalogEntry);
-    }
-
     private <T> Map<String, T> byId(Collection<T> entries, Function<T, String> identity) {
         return entries.stream().collect(Collectors.toMap(identity, Function.identity()));
     }
@@ -288,10 +239,6 @@ public class IssueFilterViewFactory {
 
     private IssueFilterView.EpicReference epicReference(String epicKey) {
         return epicKey == null ? null : new IssueFilterView.EpicReference(epicKey);
-    }
-
-    /** One join row flattened to the pair the grouping needs. */
-    private record NameLink(String issueId, String name) {
     }
 
 }

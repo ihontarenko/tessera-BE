@@ -98,7 +98,7 @@ public class ProjectPermissionService {
      * Read visibility for a project-scoped resource. A non-member cannot even know the project exists
      * (membership-based isolation, ADR-0002), so their access is a {@code 404}, not a {@code 403};
      * a member without {@code BROWSE_PROJECT} (e.g. denied by an override) gets a {@code 403}. The
-     * single gate every read endpoint on a project's issues/comments/history/components/versions uses.
+     * single gate every read endpoint on a project's issues, comments and history uses.
      */
     public void requireVisible(String memberId, String projectId) {
         if (!isMember(memberId, projectId)) {

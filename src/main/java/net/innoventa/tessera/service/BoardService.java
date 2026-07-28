@@ -233,8 +233,8 @@ public class BoardService {
      * (ADR-0008). The predicate runs <em>after</em> SQL, over the already-loaded scope, so it can only
      * ever mark what the caller could already read — a filter grants no visibility of its own.
      * <p>
-     * Nothing here executes on an unfiltered render: the filter view-model, with its label/component/
-     * version joins, is hydrated only when a request actually carries an expression. {@code now} is
+     * Nothing here executes on an unfiltered render: the filter view-model, with its label and link
+     * joins, is hydrated only when a request actually carries an expression. {@code now} is
      * resolved once, here, so every card in the run is measured against the same instant rather than
      * drifting between the first card and the last.
      */

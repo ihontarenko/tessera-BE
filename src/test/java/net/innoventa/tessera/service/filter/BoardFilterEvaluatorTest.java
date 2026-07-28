@@ -156,6 +156,25 @@ class BoardFilterEvaluatorTest {
                 .hasMessageContaining("labels");
         }
 
+        /**
+         * The removal's acceptance gate (ADR-0017). A saved filter written before components and
+         * versions were dropped still sits in the database, and the failure mode that matters is the
+         * quiet one: if the engine answered {@code null} for a gone accessor, {@code filter} would read
+         * that as "does not match" and the author would see an empty board with no explanation. These
+         * two must refuse out loud, like any other field an issue does not have.
+         */
+        @Test
+        @DisplayName("a filter left over from components and versions is refused, not silently empty")
+        void refusesAccessorsRemovedByAdr0017() {
+            assertThatThrownBy(() -> matching("issue.components hasAny(['api'])"))
+                .isInstanceOf(FilterExpressionException.class)
+                .hasMessageContaining("does not have");
+
+            assertThatThrownBy(() -> matching("issue.versions hasAny(['1.0'])"))
+                .isInstanceOf(FilterExpressionException.class)
+                .hasMessageContaining("does not have");
+        }
+
         @Test
         @DisplayName("an unknown filter or test is distinct from a field that does not exist")
         void refusesUnknownProcessor() {

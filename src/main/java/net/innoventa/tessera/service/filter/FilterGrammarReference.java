@@ -38,8 +38,6 @@ public class FilterGrammarReference {
         new GrammarEntry("issue.reporter", "Compare against currentMember"),
         new GrammarEntry("issue.epic.key", "The resolved Epic ancestor's key"),
         new GrammarEntry("issue.labels", "List of label names"),
-        new GrammarEntry("issue.components", "List of component names"),
-        new GrammarEntry("issue.versions", "List of version names"),
         new GrammarEntry("issue.links", "List of {type, direction, issueKey}"),
         new GrammarEntry("issue.createdAt", "Instant — compare against now"),
         new GrammarEntry("issue.updatedAt", "Instant — compare against now"),
