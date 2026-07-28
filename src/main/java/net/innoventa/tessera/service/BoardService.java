@@ -16,10 +16,12 @@ import net.innoventa.tessera.dto.MemberSummary;
 import net.innoventa.tessera.dto.board.BoardCardView;
 import net.innoventa.tessera.dto.board.BoardColumnView;
 import net.innoventa.tessera.dto.board.BoardResponse;
+import net.innoventa.tessera.dto.filter.FilterPreviewView;
 import net.innoventa.tessera.dto.sprint.ActiveSprintView;
 import net.innoventa.tessera.dto.issue.IssueTypeSummary;
 import net.innoventa.tessera.dto.issue.PrioritySummary;
 import net.innoventa.tessera.dto.issue.StatusSummary;
+import net.innoventa.tessera.exception.FilterExpressionException;
 import net.innoventa.tessera.exception.ResourceNotFoundException;
 import net.innoventa.tessera.repository.BoardColumnRepository;
 import net.innoventa.tessera.repository.BoardColumnStatusRepository;
@@ -86,22 +88,15 @@ public class BoardService {
      *               filter outlive the client-side stub it replaced and, later, move into SQL.
      */
     public BoardResponse getBoard(Jwt jwt, String projectId, String filter) {
-        Member caller = memberService.resolveMember(jwt);
-        projectService.requireProject(projectId);
-        projectPermissionService.requireVisible(caller.getId(), projectId);
+        LoadedBoard loaded = loadBoard(jwt, projectId);
 
-        Board board = requireBoard(projectId);
+        Board board = loaded.board();
+        List<Issue> issues = loaded.issues();
+        Catalogs catalogs = loaded.catalogs();
+        Sprint activeSprint = loaded.activeSprint();
+
         ColumnMapping mapping = loadColumnMapping(board.getId());
-
-        // Only a sprint-scoped board asks about sprints at all, so an ALL_ISSUES board renders through
-        // exactly the code path it did before this phase — one fewer query, and no behaviour to regress.
-        Sprint activeSprint = board.getScopeStrategy() == BoardScopeStrategy.ACTIVE_SPRINT
-            ? sprintService.activeSprint(projectId).orElse(null)
-            : null;
-
-        List<Issue> issues = issuesInScope(board, projectId, activeSprint);
-        Catalogs catalogs = loadCatalogs(issues);
-        List<String> matchedCardIds = matchedCardIds(filter, issues, catalogs, caller);
+        List<String> matchedCardIds = matchedCardIds(filter, issues, catalogs, loaded.caller());
 
         List<BoardCardView> cards = issues.stream()
             .map(issue -> toCard(issue, mapping.columns(), mapping.statusToColumn(), catalogs))
@@ -126,6 +121,63 @@ public class BoardService {
             cards,
             matchedCardIds
         );
+    }
+
+    /**
+     * The board and everything derived from it, behind the membership gate every project-scoped read
+     * shares. Extracted so the filter editor's preview narrows <em>the caller's own board</em> — the
+     * same scope, the same permissions, the same slice — rather than growing a second, subtly different
+     * idea of what a project's issues are.
+     */
+    private LoadedBoard loadBoard(Jwt jwt, String projectId) {
+        Member caller = memberService.resolveMember(jwt);
+        projectService.requireProject(projectId);
+        projectPermissionService.requireVisible(caller.getId(), projectId);
+
+        Board board = requireBoard(projectId);
+
+        // Only a sprint-scoped board asks about sprints at all, so an ALL_ISSUES board renders through
+        // exactly the code path it did before this phase — one fewer query, and no behaviour to regress.
+        Sprint activeSprint = board.getScopeStrategy() == BoardScopeStrategy.ACTIVE_SPRINT
+            ? sprintService.activeSprint(projectId).orElse(null)
+            : null;
+
+        List<Issue> issues = issuesInScope(board, projectId, activeSprint);
+
+        return new LoadedBoard(caller, board, activeSprint, issues, loadCatalogs(issues));
+    }
+
+    /**
+     * Try an expression against the caller's own board without applying it — what the filter editor
+     * needs to say "valid, matches 4 of 37" while someone is still typing.
+     * <p>
+     * It answers rather than throws for an unusable expression: a half-typed predicate is the normal
+     * state of a text field, so a 400 per keystroke would be noise. Everything else about it is the
+     * board read — same gate, same slice — so a preview can no more see a foreign issue than a render
+     * can, and the count it reports is the count the member would actually get.
+     */
+    public FilterPreviewView previewFilter(Jwt jwt, String projectId, String expression) {
+        LoadedBoard loaded = loadBoard(jwt, projectId);
+        List<IssueFilterView> views = issueFilterViewFactory.build(loaded.issues(), loaded.catalogs().epicKeys);
+
+        try {
+            Set<String> matched = boardFilterEvaluator
+                .matchingIssueIds(expression, views, loaded.caller(), Instant.now());
+
+            return FilterPreviewView.valid(matched.size(), views.size());
+        } catch (FilterExpressionException exception) {
+            return FilterPreviewView.invalid(exception.getMessage(), views.size());
+        }
+    }
+
+    /** One gated load of a project's board: the caller, the board, its sprint, its issues, its catalogs. */
+    private record LoadedBoard(
+        Member caller,
+        Board board,
+        Sprint activeSprint,
+        List<Issue> issues,
+        Catalogs catalogs
+    ) {
     }
 
     /**

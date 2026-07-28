@@ -2,8 +2,11 @@ package net.innoventa.tessera.controller;
 
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import net.innoventa.tessera.dto.filter.FilterPreviewView;
+import net.innoventa.tessera.dto.filter.PreviewFilterRequest;
 import net.innoventa.tessera.dto.filter.SaveFilterRequest;
 import net.innoventa.tessera.dto.filter.SavedFilterView;
+import net.innoventa.tessera.service.BoardService;
 import net.innoventa.tessera.service.SavedFilterService;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -32,10 +35,25 @@ import java.util.List;
 public class SavedFilterController {
 
     private final SavedFilterService savedFilterService;
+    private final BoardService boardService;
 
     @GetMapping
     public List<SavedFilterView> list(@AuthenticationPrincipal Jwt jwt, @PathVariable String projectId) {
         return savedFilterService.list(jwt, projectId);
+    }
+
+    /**
+     * Try an expression against the caller's own board without saving or applying it — what the editor
+     * calls while someone is still typing. A broken expression comes back as {@code valid: false} with a
+     * message rather than a {@code 400}, because mid-edit is not a client error.
+     */
+    @PostMapping("/preview")
+    public FilterPreviewView preview(
+        @AuthenticationPrincipal Jwt jwt,
+        @PathVariable String projectId,
+        @RequestBody PreviewFilterRequest request
+    ) {
+        return boardService.previewFilter(jwt, projectId, request.expression());
     }
 
     @PostMapping

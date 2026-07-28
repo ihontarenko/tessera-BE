@@ -158,8 +158,7 @@ public class BoardFilterEvaluator {
         if (exception instanceof NullPointerException) {
             return new FilterExpressionException(
                 "This filter asks an issue for something it does not have. Available: "
-                    + "id, key, summary, type, priority, status, resolution, assignee, reporter, epic, "
-                    + "labels, components, versions, links, createdAt, updatedAt, resolvedAt.");
+                    + String.join(", ", FilterGrammarReference.accessorNames()) + ".");
         }
 
         return new FilterExpressionException("This filter could not be evaluated: " + reason(exception));
