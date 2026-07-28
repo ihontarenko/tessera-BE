@@ -28,6 +28,19 @@ public record BoardResponse(
     Integer hideDoneOlderThanDays,
     ActiveSprintView activeSprint,
     List<BoardColumnView> columns,
-    List<BoardCardView> cards
+    List<BoardCardView> cards,
+
+    /**
+     * Which cards satisfied the request's {@code filter} predicate (ADR-0008), or {@code null} when
+     * the request carried none.
+     * <p>
+     * A filter narrows <em>what one viewer is looking at</em>, not what the board holds — so the
+     * filtered cards are still sent and marked, rather than dropped. That is what keeps WIP counts
+     * describing the stage instead of the viewer: a column at its limit does not stop being at its
+     * limit because someone filtered down to their own issues. The predicate is still evaluated
+     * server-side, which is the point of ADR-0008; only the discarding is left to the client, which
+     * is the only place that knows whose view it is.
+     */
+    List<String> matchedCardIds
 ) {
 }

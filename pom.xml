@@ -26,6 +26,7 @@
         <lombok.mapstruct.binding.version>0.2.0</lombok.mapstruct.binding.version>
         <springdoc.version>2.5.0</springdoc.version>
         <testcontainers.version>1.19.8</testcontainers.version>
+        <jmouse.el.version>1.0.0-Stable_20260728</jmouse.el.version>
         <!-- Overridable on the command line: `-DskipFrontend=true` skips the SPA bundle step. -->
         <skipFrontend>false</skipFrontend>
     </properties>
@@ -128,6 +129,15 @@
             <groupId>org.mapstruct</groupId>
             <artifactId>mapstruct</artifactId>
             <version>${mapstruct.version}</version>
+        </dependency>
+
+        <!-- jMouse Expression Language — the board's filter engine (ADR-0008). Tessera does not invent
+             a query language; a filter is a jME boolean predicate evaluated over the loaded board
+             slice. Pulls jmouse-core transitively. -->
+        <dependency>
+            <groupId>org.jmouse</groupId>
+            <artifactId>jmouse-el</artifactId>
+            <version>${jmouse.el.version}</version>
         </dependency>
 
         <!-- Testing -->

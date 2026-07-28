@@ -18,6 +18,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -35,9 +36,19 @@ public class BoardController {
     private final BoardMoveService boardMoveService;
     private final BoardSettingsService boardSettingsService;
 
+    /**
+     * The board, optionally narrowed by a jME predicate (ADR-0008) — {@code ?filter=issue.assignee ==
+     * currentMember}. Only the expression is sent: the server already holds the issues, so a filter
+     * costs one query parameter rather than a round trip of the board's own payload. An unusable
+     * expression is a {@code 400} with a message written for whoever typed it.
+     */
     @GetMapping("/api/projects/{projectId}/board")
-    public BoardResponse board(@AuthenticationPrincipal Jwt jwt, @PathVariable String projectId) {
-        return boardService.getBoard(jwt, projectId);
+    public BoardResponse board(
+        @AuthenticationPrincipal Jwt jwt,
+        @PathVariable String projectId,
+        @RequestParam(required = false) String filter
+    ) {
+        return boardService.getBoard(jwt, projectId, filter);
     }
 
     @PostMapping("/api/projects/{projectId}/board/move")

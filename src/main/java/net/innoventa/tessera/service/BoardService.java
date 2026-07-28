@@ -30,10 +30,14 @@ import net.innoventa.tessera.repository.MemberRepository;
 import net.innoventa.tessera.repository.PriorityRepository;
 import net.innoventa.tessera.repository.StatusRepository;
 import net.innoventa.tessera.security.Permissions;
+import net.innoventa.tessera.service.filter.BoardFilterEvaluator;
+import net.innoventa.tessera.service.filter.IssueFilterView;
+import net.innoventa.tessera.service.filter.IssueFilterViewFactory;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.Instant;
 import java.time.LocalDate;
 import java.util.List;
 import java.util.Map;
@@ -72,8 +76,16 @@ public class BoardService {
     private final EpicResolver epicResolver;
     private final SprintService sprintService;
     private final SprintMembershipService sprintMembershipService;
+    private final IssueFilterViewFactory issueFilterViewFactory;
+    private final BoardFilterEvaluator boardFilterEvaluator;
 
-    public BoardResponse getBoard(Jwt jwt, String projectId) {
+    /**
+     * @param filter an optional jME predicate over one issue (ADR-0008), e.g.
+     *               {@code issue.assignee == currentMember}. Null or blank renders the whole scope.
+     *               Only the expression travels — the issues are already here — which is what lets a
+     *               filter outlive the client-side stub it replaced and, later, move into SQL.
+     */
+    public BoardResponse getBoard(Jwt jwt, String projectId, String filter) {
         Member caller = memberService.resolveMember(jwt);
         projectService.requireProject(projectId);
         projectPermissionService.requireVisible(caller.getId(), projectId);
@@ -89,6 +101,7 @@ public class BoardService {
 
         List<Issue> issues = issuesInScope(board, projectId, activeSprint);
         Catalogs catalogs = loadCatalogs(issues);
+        List<String> matchedCardIds = matchedCardIds(filter, issues, catalogs, caller);
 
         List<BoardCardView> cards = issues.stream()
             .map(issue -> toCard(issue, mapping.columns(), mapping.statusToColumn(), catalogs))
@@ -110,7 +123,8 @@ public class BoardService {
             board.getHideDoneOlderThanDays(),
             activeSprint == null ? null : ActiveSprintView.from(activeSprint, LocalDate.now()),
             columnViews,
-            cards
+            cards,
+            matchedCardIds
         );
     }
 
@@ -143,6 +157,26 @@ public class BoardService {
             .filter(issue -> committedIssueIds.contains(issue.getId())
                 || committedIssueIds.contains(issue.getParentId()))
             .toList();
+    }
+
+    /**
+     * The cards satisfying the request's filter predicate, or {@code null} when there is no filter
+     * (ADR-0008). The predicate runs <em>after</em> SQL, over the already-loaded scope, so it can only
+     * ever mark what the caller could already read — a filter grants no visibility of its own.
+     * <p>
+     * Nothing here executes on an unfiltered render: the filter view-model, with its label/component/
+     * version joins, is hydrated only when a request actually carries an expression. {@code now} is
+     * resolved once, here, so every card in the run is measured against the same instant rather than
+     * drifting between the first card and the last.
+     */
+    private List<String> matchedCardIds(String filter, List<Issue> issues, Catalogs catalogs, Member caller) {
+        if (filter == null || filter.isBlank()) {
+            return null;
+        }
+
+        List<IssueFilterView> views = issueFilterViewFactory.build(issues, catalogs.epicKeys);
+
+        return List.copyOf(boardFilterEvaluator.matchingIssueIds(filter, views, caller, Instant.now()));
     }
 
     /** The board entity for a project, or {@code 404} — shared with {@link BoardMoveService}. */
