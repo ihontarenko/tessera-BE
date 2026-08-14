@@ -11,10 +11,20 @@
 *.rar
 hs_err_pid*
 .idea/
-target/
-bin/
-out/
-output/
+# ⚠️ ANCHORED TO THE REPOSITORY ROOT, and the leading slash is load-bearing.
+#
+# An unanchored `target/` matches a directory called `target` ANYWHERE, including a Java package —
+# and it did: `net.innoventa.tessera.security.access.target` was silently untracked, so three source
+# files (`IssueByKey`, `IssueAccessTargetResolver`, `IssueByKeyAccessTargetResolver`) had never been
+# committed and a fresh clone did not compile. Nothing reports that; `git status` shows an ignored
+# file as nothing at all.
+#
+# `bin`, `out` and `output` are anchored for the same reason before they cost anybody the same day.
+# These four are build outputs of THIS module, which is where they are and the only place they are.
+/target/
+/bin/
+/out/
+/output/
 .settings/
 .vscode/
 *.iml
