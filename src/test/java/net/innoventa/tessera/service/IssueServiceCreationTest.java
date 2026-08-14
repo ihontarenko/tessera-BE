@@ -64,7 +64,6 @@ class IssueServiceCreationTest {
     @Mock private CommentRepository commentRepository;
     @Mock private ProjectService projectService;
     @Mock private ProjectIssueTypeService projectIssueTypeService;
-    @Mock private ProjectPermissionService projectPermissionService;
     @Mock private MemberService memberService;
     @Mock private WorkflowResolver workflowResolver;
     @Mock private RankService rankService;

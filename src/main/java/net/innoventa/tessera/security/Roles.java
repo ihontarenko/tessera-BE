@@ -1,7 +1,6 @@
 package net.innoventa.tessera.security;
 
 import java.util.List;
-import java.util.Map;
 
 /**
  * The role names {@code policy/tessera.jmp} declares, for the code that has to hand one out.
@@ -40,30 +39,6 @@ public final class Roles {
     /** The three a person may be given in a project, widest last — the order a picker offers them in. */
     public static final List<String> PROJECT_ROLES =
             List.of(PROJECT_VIEWER, PROJECT_DEVELOPER, PROJECT_ADMINISTRATOR);
-
-    private static final Map<String, String> BY_DISPLAY_NAME = Map.of(
-            "Administrator", PROJECT_ADMINISTRATOR,
-            "Developer",     PROJECT_DEVELOPER,
-            "Viewer",        PROJECT_VIEWER);
-
-    /**
-     * The engine's name for a role {@code project_roles} calls by its display name.
-     *
-     * <p>⚠️ <strong>Transitional, and it goes with the table.</strong> While both models are standing
-     * side by side, membership administration writes to each — the old rows because the people screen
-     * still reads them, and the engine because that is what authorization is decided from. The two speak
-     * different names for the same three roles, and this is the one place that knows the translation.
-     * V000014 retires the table and this method with it.
-     *
-     * <p>The same three strings are in {@code V000013__authorization_handover.sql}, which is where the
-     * existing rows were translated. Two copies of one mapping, both about to be deleted, is better than
-     * a lookup table that outlives the thing it maps.
-     *
-     * @return the engine's role name, or null where the display name is none of the three
-     */
-    public static String ofDisplayName(String displayName) {
-        return BY_DISPLAY_NAME.get(displayName);
-    }
 
     private Roles() {
     }

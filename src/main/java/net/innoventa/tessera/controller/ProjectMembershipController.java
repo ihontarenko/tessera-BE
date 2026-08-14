@@ -5,7 +5,6 @@ import lombok.RequiredArgsConstructor;
 import net.innoventa.tessera.dto.membership.AddProjectMemberRequest;
 import net.innoventa.tessera.dto.membership.ProjectMemberResponse;
 import net.innoventa.tessera.dto.membership.SetMemberRolesRequest;
-import net.innoventa.tessera.dto.membership.SetPermissionOverrideRequest;
 import net.innoventa.tessera.security.Permissions;
 import net.innoventa.tessera.security.access.Scopes;
 import net.innoventa.tessera.service.ProjectMembershipService;
@@ -26,16 +25,22 @@ import org.springframework.web.bind.annotation.RestController;
 import java.util.List;
 
 /**
- * Project access administration — members, their roles, and their individual permission overrides.
+ * Who is in a project, and what role they hold there.
  *
  * <p>The class declares {@code ADMINISTER_PROJECT} at the project, because that is what every mutation
  * here costs; the one read overrides it downwards. Writing it once and letting the read say what it
  * needs is the shape the annotation is for — the alternative, five identical lines and one different
  * one, is where somebody eventually pastes the wrong one.
  *
- * <p>⚠️ <strong>The permission is on the route now, not in the service.</strong> The deny-wins model it
- * edits is the engine's, and every change made here is written into {@code access_*} as well as into the
- * retiring local tables — see {@code LocalAuthorizationMirror}.
+ * <p>⚠️ <strong>There is one home for a grant, and a membership IS one.</strong> Adding somebody here
+ * writes an {@code access_role_assignments} row and nothing else — no local table beside it, no mirror
+ * keeping two stores in step. A role is addressed by the name the policy document writes, which is why
+ * this screen and the installation-wide one finally say the same word for the same thing.
+ *
+ * <p>⚠️ <strong>Personal allow and deny are not here any more.</strong> A per-person override inside one
+ * project was a second answer to "what may this person do", given by somebody the role model
+ * deliberately withholds that power from. It lives on {@code /admin/access}, behind
+ * {@code access:administer}, where whoever grants it also maintains the roles it overrides.
  */
 @RestController
 @RequestMapping("/api/projects/{projectId}/members")
@@ -82,24 +87,9 @@ public class ProjectMembershipController {
         membershipService.removeMember(jwt, projectId, memberId);
     }
 
-    @PutMapping("/{memberId}/overrides")
-    public ProjectMemberResponse setOverride(
-        @AuthenticationPrincipal Jwt jwt,
-        @PathVariable String projectId,
-        @PathVariable String memberId,
-        @Valid @RequestBody SetPermissionOverrideRequest request
-    ) {
-        return membershipService.setOverride(jwt, projectId, memberId, request);
-    }
-
-    @DeleteMapping("/{memberId}/overrides/{permissionId}")
-    public ProjectMemberResponse clearOverride(
-        @AuthenticationPrincipal Jwt jwt,
-        @PathVariable String projectId,
-        @PathVariable String memberId,
-        @PathVariable String permissionId
-    ) {
-        return membershipService.clearOverride(jwt, projectId, memberId, permissionId);
-    }
+    // ⚠️ There are no override routes any more, and their absence is the point. A per-person allow
+    // or deny inside one project was a second answer to "what may this person do" — editable here,
+    // but invisible to whoever maintains the roles everybody else is judged by. Permissions come
+    // from roles, and roles are edited once, installation-wide. See ProjectMembershipService.
 
 }

@@ -2,60 +2,68 @@ package net.innoventa.tessera.service;
 
 import lombok.RequiredArgsConstructor;
 import net.innoventa.tessera.domain.Member;
-import net.innoventa.tessera.domain.Permission;
-import net.innoventa.tessera.domain.PermissionEffect;
-import net.innoventa.tessera.domain.ProjectMembership;
-import net.innoventa.tessera.domain.ProjectPermissionOverride;
-import net.innoventa.tessera.domain.ProjectRole;
 import net.innoventa.tessera.dto.MemberSummary;
 import net.innoventa.tessera.dto.membership.AddProjectMemberRequest;
-import net.innoventa.tessera.dto.membership.OverrideSummary;
 import net.innoventa.tessera.dto.membership.ProjectMemberResponse;
-import net.innoventa.tessera.dto.membership.RoleSummary;
 import net.innoventa.tessera.dto.membership.SetMemberRolesRequest;
-import net.innoventa.tessera.dto.membership.SetPermissionOverrideRequest;
 import net.innoventa.tessera.exception.BusinessRuleViolationException;
 import net.innoventa.tessera.exception.ResourceNotFoundException;
-import net.innoventa.tessera.repository.MemberRepository;
-import net.innoventa.tessera.repository.PermissionRepository;
-import net.innoventa.tessera.repository.ProjectMembershipRepository;
-import net.innoventa.tessera.repository.ProjectPermissionOverrideRepository;
-import net.innoventa.tessera.repository.ProjectRoleRepository;
-import net.innoventa.tessera.security.access.LocalAuthorizationMirror;
+import net.innoventa.tessera.security.Permissions;
+import net.innoventa.tessera.security.Roles;
 import net.innoventa.tessera.security.access.ProjectAccess;
+import net.innoventa.tessera.security.access.Targets;
+import net.innoventa.tessera.security.access.TesseraScope;
+import org.jmouse.access.jpa.AccessAdministration;
+import org.jmouse.access.jpa.AccessDisclosure;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
-import java.util.Set;
-import java.util.function.Function;
-import java.util.function.Supplier;
-import java.util.stream.Collectors;
 
 /**
- * Project membership and role/override administration. Every mutation here requires
- * {@code ADMINISTER_PROJECT} in the target project; viewing the people list requires only membership.
- * A last-administrator guard stops a project being left with no one who can administer it (which no
- * later action could recover without a database edit).
+ * Who is in a project, and what role they hold there.
+ *
+ * <h2>⚠️ There is one home for a grant now, and this is not it</h2>
+ *
+ * <p>This used to keep its own tables — {@code project_memberships} joined to {@code project_roles},
+ * with {@code project_permission_overrides} beside them — and <strong>dual-write</strong> every change
+ * into the engine as well. Two stores, one truth, and a reconciliation nobody could see. The tables are
+ * gone (V000014); a membership is an {@code access_role_assignments} row and this class reads and
+ * writes it through the engine's own ports.
+ *
+ * <p>The practical consequence is that a role is addressed <strong>by name</strong> —
+ * {@code PROJECT_DEVELOPER}, the name the policy document writes and the access screen shows — rather
+ * than by a surrogate identifier from a table that no longer exists. The per-project picker and the
+ * installation-wide screen finally say the same word for the same thing.
+ *
+ * <h2>⚠️ Personal permission overrides are gone, deliberately</h2>
+ *
+ * <p>A per-person allow or deny inside one project was a second way to answer "what may this person
+ * do", and it answered differently from the roles every other screen shows. It also put a power in the
+ * project administrator's hands that the role model deliberately withholds: granting somebody a
+ * permission their role does not carry, one project at a time, invisibly to whoever maintains the
+ * roles. What a role carries is edited in one place, installation-wide, by somebody holding
+ * {@code access:administer} — and that is now the only place any permission comes from.
+ *
+ * <p>Nothing is lost that a role cannot express: needing a fourth combination of permissions is an
+ * argument for a fourth role, which everybody can see, rather than an exception buried in one project.
  */
 @Service
 @RequiredArgsConstructor
 public class ProjectMembershipService {
 
-    private static final String ADMINISTRATOR_ROLE_NAME = "Administrator";
+    /** How a membership written by this screen identifies itself among the engine's rows. */
+    private static final String SOURCE = "MEMBERSHIP";
 
-    private final ProjectMembershipRepository membershipRepository;
-    private final ProjectPermissionOverrideRepository overrideRepository;
-    private final ProjectRoleRepository projectRoleRepository;
-    private final PermissionRepository permissionRepository;
-    private final MemberRepository memberRepository;
-    private final MemberService memberService;
-    private final ProjectService projectService;
-    private final ProjectAccess projectAccess;
-    private final LocalAuthorizationMirror grants;
-    private final Supplier<String> idGenerator;
+    private final MemberService        memberService;
+    private final ProjectService       projectService;
+    private final ProjectAccess        projectAccess;
+    private final AccessAdministration access;
+    private final AccessDisclosure     disclosure;
 
     @Transactional(readOnly = true)
     public List<ProjectMemberResponse> listMembers(Jwt jwt, String projectId) {
@@ -64,64 +72,48 @@ public class ProjectMembershipService {
 
         // ADR-0002's isolation is the route's: BROWSE_PROJECT at the project, refused as a 404 for
         // anybody holding nothing there.
-        return buildMemberResponses(projectId);
+        return membersOf(projectId);
     }
 
     @Transactional
     public List<ProjectMemberResponse> addMember(Jwt jwt, String projectId, AddProjectMemberRequest request) {
         Member caller = requireAdministration(jwt, projectId);
-
         Member target = memberService.requireMember(request.memberId());
-        request.roleIds().stream().distinct().forEach(roleId -> {
-            requireRole(roleId);
-            if (!membershipRepository.existsByProjectIdAndMemberIdAndRoleId(projectId, target.getId(), roleId)) {
-                membershipRepository.save(ProjectMembership.builder()
-                    .id(idGenerator.get())
-                    .projectId(projectId)
-                    .memberId(target.getId())
-                    .roleId(roleId)
-                    .build());
-            }
 
-            grants.assignRole(target.getId(), projectId, displayNameOf(roleId), caller.getId());
+        request.roleNames().stream().distinct().forEach(roleName -> {
+            requireProjectRole(roleName);
+            access.assign(target.getId(), roleName, Targets.projectScope(projectId), SOURCE, caller.getId(), null);
         });
 
-        return buildMemberResponses(projectId);
+        return membersOf(projectId);
     }
 
+    /**
+     * Replace the whole set of roles somebody holds here.
+     *
+     * <p>Everything back, then what the request asked for — a role kept across the change is taken and
+     * re-given, which is one row rewritten rather than two states to reason about.
+     */
     @Transactional
-    public ProjectMemberResponse setRoles(Jwt jwt, String projectId, String memberId, SetMemberRolesRequest request) {
+    public ProjectMemberResponse setRoles(
+        Jwt jwt, String projectId, String memberId, SetMemberRolesRequest request) {
+
         Member caller = requireAdministration(jwt, projectId);
         Member target = memberService.requireMember(memberId);
 
-        List<String> roleIds = request.roleIds().stream().distinct().toList();
-        roleIds.forEach(this::requireRole);
+        List<String> roleNames = request.roleNames().stream().distinct().toList();
+        roleNames.forEach(ProjectMembershipService::requireProjectRole);
 
-        boolean losesAdministrator = !roleIds.contains(administratorRoleId());
-        if (losesAdministrator && isOnlyAdministrator(projectId, target.getId())) {
+        if (!roleNames.contains(Roles.PROJECT_ADMINISTRATOR) && isOnlyAdministrator(projectId, target.getId())) {
             throw new BusinessRuleViolationException(
-                "Cannot remove the Administrator role from the project's only administrator");
+                "Cannot remove the administrator role from the project's only administrator");
         }
 
-        // Replace-the-set. Flush the delete before the inserts so a kept role does not collide with
-        // its own about-to-be-deleted row (Hibernate flushes inserts before deletes otherwise).
-        membershipRepository.deleteByProjectIdAndMemberId(projectId, target.getId());
-        membershipRepository.flush();
-        roleIds.forEach(roleId -> membershipRepository.save(ProjectMembership.builder()
-            .id(idGenerator.get())
-            .projectId(projectId)
-            .memberId(target.getId())
-            .roleId(roleId)
-            .build()));
+        access.unassignAllAt(target.getId(), Targets.projectScope(projectId));
+        roleNames.forEach(roleName ->
+            access.assign(target.getId(), roleName, Targets.projectScope(projectId), SOURCE, caller.getId(), null));
 
-        // Replace-the-set on the engine's side too, and in the same order: everything back, then what
-        // the request asked for. A role kept across the change is taken and re-given, which is one row
-        // rewritten rather than two states to reason about.
-        grants.unassignAllRoles(target.getId(), projectId);
-        roleIds.forEach(roleId ->
-            grants.assignRole(target.getId(), projectId, displayNameOf(roleId), caller.getId()));
-
-        return buildMemberResponse(target.getId(), projectId);
+        return memberOf(projectId, target.getId());
     }
 
     @Transactional
@@ -130,178 +122,104 @@ public class ProjectMembershipService {
         Member target = memberService.requireMember(memberId);
 
         if (isOnlyAdministrator(projectId, target.getId())) {
-            throw new BusinessRuleViolationException(
-                "Cannot remove the project's only administrator");
+            throw new BusinessRuleViolationException("Cannot remove the project's only administrator");
         }
 
-        membershipRepository.deleteByProjectIdAndMemberId(projectId, target.getId());
-        overrideRepository.deleteByProjectIdAndMemberId(projectId, target.getId());
-
-        // ⚠️ Nothing cascades. A library table cannot foreign-key into this product's rows, so deleting
-        // a membership leaves every grant it stood for behind unless something takes them back by hand.
-        grants.clearEverythingFor(target.getId(), projectId);
+        access.unassignAllAt(target.getId(), Targets.projectScope(projectId));
     }
 
-    @Transactional
-    public ProjectMemberResponse setOverride(Jwt jwt, String projectId, String memberId, SetPermissionOverrideRequest request) {
-        Member caller = requireAdministration(jwt, projectId);
-        Member target = memberService.requireMember(memberId);
-        requirePermission(request.permissionId());
+    // ── Reads ─────────────────────────────────────────────────────────────────
 
-        // A business rule rather than an authorization check: an override on somebody who is not here
-        // would sit in the table granting or denying nothing, and nobody would find it.
-        if (!projectAccess.isMember(target, projectId)) {
-            throw new BusinessRuleViolationException("Member is not part of this project: " + memberId);
-        }
+    /**
+     * Everybody holding a role in this project, with the roles they hold.
+     *
+     * <p>⚠️ <strong>Membership is not a row to look up any more — it is what the grants say.</strong>
+     * Somebody appears here exactly when they hold a project role here, which is the same fact
+     * every authorization decision is made from, so the screen cannot disagree with the engine.
+     */
+    private List<ProjectMemberResponse> membersOf(String projectId) {
+        Map<String, List<String>> rolesByMember = new LinkedHashMap<>();
 
-        // One override per (project, member, permission): replace any existing one.
-        overrideRepository.deleteByProjectIdAndMemberIdAndPermissionId(projectId, target.getId(), request.permissionId());
-        overrideRepository.flush();
-        overrideRepository.save(ProjectPermissionOverride.builder()
-            .id(idGenerator.get())
-            .projectId(projectId)
-            .memberId(target.getId())
-            .permissionId(request.permissionId())
-            .effect(request.effect())
-            .build());
+        disclosure.roleHoldings().stream()
+            .filter(holding -> TesseraScope.PROJECT.equals(holding.at().type()))
+            .filter(holding -> projectId.equals(holding.at().id()))
+            .forEach(holding -> rolesByMember
+                .computeIfAbsent(holding.subjectId(), memberId -> new java.util.ArrayList<>())
+                .add(holding.roleName()));
 
-        grants.setOverride(target.getId(), projectId, permissionNameOf(request.permissionId()),
-            request.effect() == PermissionEffect.ALLOW, caller.getId());
-
-        return buildMemberResponse(target.getId(), projectId);
+        return rolesByMember.entrySet().stream()
+            .map(entry -> describe(entry.getKey(), entry.getValue()))
+            .filter(java.util.Objects::nonNull)
+            .sorted(Comparator.comparing(response -> response.member().displayName() == null
+                ? response.member().id()
+                : response.member().displayName()))
+            .toList();
     }
 
-    @Transactional
-    public ProjectMemberResponse clearOverride(Jwt jwt, String projectId, String memberId, String permissionId) {
-        requireAdministration(jwt, projectId);
-        Member target = memberService.requireMember(memberId);
-
-        overrideRepository.deleteByProjectIdAndMemberIdAndPermissionId(projectId, target.getId(), permissionId);
-
-        grants.clearOverride(target.getId(), projectId, permissionNameOf(permissionId));
-
-        return buildMemberResponse(target.getId(), projectId);
+    private ProjectMemberResponse memberOf(String projectId, String memberId) {
+        return membersOf(projectId).stream()
+            .filter(response -> response.member().id().equals(memberId))
+            .findFirst()
+            .orElseThrow(() -> new ResourceNotFoundException("Member is not part of this project: " + memberId));
     }
 
     /**
-     * The caller, having proved they may administer this project.
+     * A holding as the screen shows it, or null where the account behind it no longer exists.
      *
-     * <p>⚠️ <strong>The permission check itself is on the route now</strong> — every method here is
-     * reached through a handler carrying {@code @RequiresAccess(ADMINISTER_PROJECT, scope = PROJECT)},
-     * and the engine has already refused before any of this runs. What survives is resolving the caller,
-     * because an administration change records <em>who</em> made it, and asserting the project exists,
-     * because a 404 is a better answer than a grant at a place nothing has.
+     * <p>A grant outliving its member is a row worth keeping — it is auditable, and the access screen
+     * says so plainly — but a project's people list is not where somebody should meet it.
      */
+    private ProjectMemberResponse describe(String memberId, List<String> roleNames) {
+        Member member;
+
+        try {
+            member = memberService.requireMember(memberId);
+        } catch (ResourceNotFoundException gone) {
+            return null;
+        }
+
+        return new ProjectMemberResponse(MemberSummary.from(member), roleNames.stream().sorted().toList());
+    }
+
+    // ── ─────────────────────────────────────────────────────────────────────
+
     private Member requireAdministration(Jwt jwt, String projectId) {
         Member caller = memberService.resolveMember(jwt);
         projectService.requireProject(projectId);
+        projectAccess.require(caller, projectId, Permissions.ADMINISTER_PROJECT);
 
         return caller;
     }
 
-    private List<ProjectMemberResponse> buildMemberResponses(String projectId) {
-        Map<String, List<ProjectMembership>> membershipsByMember = membershipRepository.findByProjectId(projectId)
-            .stream()
-            .collect(Collectors.groupingBy(ProjectMembership::getMemberId));
-
-        Map<String, ProjectRole> rolesById = loadRolesById();
-        Map<String, Permission> permissionsById = loadPermissionsById();
-
-        return membershipsByMember.keySet().stream()
-            .map(memberId -> buildMemberResponse(memberId, projectId, rolesById, permissionsById))
-            .sorted((first, second) -> nameOf(first).compareToIgnoreCase(nameOf(second)))
-            .toList();
-    }
-
-    /** Single-member response (after a mutation) — loads the small catalogs once for this one member. */
-    private ProjectMemberResponse buildMemberResponse(String memberId, String projectId) {
-        return buildMemberResponse(memberId, projectId, loadRolesById(), loadPermissionsById());
-    }
-
-    private ProjectMemberResponse buildMemberResponse(
-        String memberId,
-        String projectId,
-        Map<String, ProjectRole> rolesById,
-        Map<String, Permission> permissionsById
-    ) {
-        Member member = memberService.requireMember(memberId);
-
-        List<RoleSummary> roles = membershipRepository.findByProjectIdAndMemberId(projectId, memberId).stream()
-            .map(ProjectMembership::getRoleId)
-            .distinct()
-            .map(rolesById::get)
-            .filter(role -> role != null)
-            .map(role -> new RoleSummary(role.getId(), role.getName()))
-            .sorted((first, second) -> first.name().compareToIgnoreCase(second.name()))
-            .toList();
-
-        List<OverrideSummary> overrides = overrideRepository.findByProjectIdAndMemberId(projectId, memberId).stream()
-            .map(override -> new OverrideSummary(
-                override.getPermissionId(),
-                permissionsById.containsKey(override.getPermissionId())
-                    ? permissionsById.get(override.getPermissionId()).getName()
-                    : override.getPermissionId(),
-                override.getEffect()))
-            .sorted((first, second) -> first.permissionName().compareToIgnoreCase(second.permissionName()))
-            .toList();
-
-        return new ProjectMemberResponse(MemberSummary.from(member), roles, overrides);
-    }
-
-    private Map<String, ProjectRole> loadRolesById() {
-        return projectRoleRepository.findAll().stream()
-            .collect(Collectors.toMap(ProjectRole::getId, Function.identity()));
-    }
-
-    private Map<String, Permission> loadPermissionsById() {
-        return permissionRepository.findAll().stream()
-            .collect(Collectors.toMap(Permission::getId, Function.identity()));
-    }
-
-    private String nameOf(ProjectMemberResponse response) {
-        String displayName = response.member().displayName();
-        return displayName != null ? displayName : response.member().id();
-    }
-
-    private boolean isOnlyAdministrator(String projectId, String memberId) {
-        Set<String> administrators = membershipRepository.findByProjectId(projectId).stream()
-            .filter(membership -> membership.getRoleId().equals(administratorRoleId()))
-            .map(ProjectMembership::getMemberId)
-            .collect(Collectors.toSet());
-
-        return administrators.size() == 1 && administrators.contains(memberId);
-    }
-
-    private String administratorRoleId() {
-        return projectRoleRepository.findByName(ADMINISTRATOR_ROLE_NAME)
-            .orElseThrow(() -> new ResourceNotFoundException("Administrator role not seeded"))
-            .getId();
-    }
-
-    private void requireRole(String roleId) {
-        if (!projectRoleRepository.existsById(roleId)) {
-            throw new ResourceNotFoundException("Project role not found: " + roleId);
-        }
-    }
-
-    private void requirePermission(String permissionId) {
-        if (!permissionRepository.existsById(permissionId)) {
-            throw new ResourceNotFoundException("Permission not found: " + permissionId);
+    /**
+     * ⚠️ One of the three a person may hold <em>in a project</em>.
+     *
+     * <p>The engine would happily assign {@code GLOBAL_ACCESS_ADMINISTRATOR} at a project scope — the
+     * grammar's {@code assignable @GLOBAL} stops it being handed out installation-wide, not the other
+     * way round — and this route must not be the way somebody acquires an installation-wide role.
+     */
+    private static void requireProjectRole(String roleName) {
+        if (!Roles.PROJECT_ROLES.contains(roleName)) {
+            throw new BusinessRuleViolationException(
+                "'" + roleName + "' is not a role a project hands out. Choose one of: "
+                + String.join(", ", Roles.PROJECT_ROLES) + ".");
         }
     }
 
     /**
-     * What {@code project_roles} calls a role, for the mirror that has to name it the engine's way.
-     *
-     * <p>⚠️ Transitional, like the mirror itself: the screens still speak the surrogate identifiers those
-     * tables hand out, and V000014 replaces both with the name.
+     * ⚠️ The last administrator cannot be demoted or removed — the rule that keeps a project
+     * administrable. It is asked of the grants, so a personal assignment counts exactly as a normal one.
      */
-    private String displayNameOf(String roleId) {
-        return projectRoleRepository.findById(roleId).map(ProjectRole::getName).orElse(null);
-    }
+    private boolean isOnlyAdministrator(String projectId, String memberId) {
+        List<String> administrators = disclosure.roleHoldings().stream()
+            .filter(holding -> TesseraScope.PROJECT.equals(holding.at().type()))
+            .filter(holding -> projectId.equals(holding.at().id()))
+            .filter(holding -> Roles.PROJECT_ADMINISTRATOR.equals(holding.roleName()))
+            .map(holding -> holding.subjectId())
+            .distinct()
+            .toList();
 
-    private String permissionNameOf(String permissionId) {
-        return permissionRepository.findById(permissionId).map(Permission::getName).orElse(null);
+        return administrators.size() == 1 && administrators.contains(memberId);
     }
 
 }

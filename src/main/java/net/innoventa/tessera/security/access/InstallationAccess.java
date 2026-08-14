@@ -36,8 +36,4 @@ public class InstallationAccess {
                 .names();
     }
 
-    public boolean holds(Member member, String permission) {
-        return permissionsOf(member).contains(permission);
-    }
-
 }

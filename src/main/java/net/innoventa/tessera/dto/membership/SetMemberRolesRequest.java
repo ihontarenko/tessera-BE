@@ -6,6 +6,6 @@ import java.util.List;
 
 /** Replace the whole set of roles a member holds in a project (must keep at least one). */
 public record SetMemberRolesRequest(
-    @NotEmpty List<String> roleIds
+    @NotEmpty List<String> roleNames
 ) {
 }

@@ -71,7 +71,6 @@ class BoardServiceFilterTest {
     @Mock private PriorityRepository priorityRepository;
     @Mock private MemberRepository memberRepository;
     @Mock private ProjectService projectService;
-    @Mock private ProjectPermissionService projectPermissionService;
     @Mock private MemberService memberService;
     @Mock private BoardColumnResolver boardColumnResolver;
     @Mock private EpicResolver epicResolver;

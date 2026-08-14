@@ -5,8 +5,6 @@ import net.innoventa.tessera.domain.Board;
 import net.innoventa.tessera.domain.BoardScopeStrategy;
 import net.innoventa.tessera.domain.Member;
 import net.innoventa.tessera.domain.Project;
-import net.innoventa.tessera.domain.ProjectMembership;
-import net.innoventa.tessera.domain.ProjectRole;
 import net.innoventa.tessera.dto.MemberSummary;
 import net.innoventa.tessera.dto.project.CreateProjectRequest;
 import net.innoventa.tessera.dto.project.ProjectResponse;
@@ -17,12 +15,14 @@ import net.innoventa.tessera.exception.ResourceNotFoundException;
 import net.innoventa.tessera.repository.BoardRepository;
 import net.innoventa.tessera.repository.IssueTypeSchemeRepository;
 import net.innoventa.tessera.repository.MemberRepository;
-import net.innoventa.tessera.repository.ProjectMembershipRepository;
+
 import net.innoventa.tessera.repository.ProjectRepository;
-import net.innoventa.tessera.repository.ProjectRoleRepository;
+
 import net.innoventa.tessera.repository.WorkflowSchemeRepository;
 import net.innoventa.tessera.security.Permissions;
-import net.innoventa.tessera.security.access.LocalAuthorizationMirror;
+import net.innoventa.tessera.security.Roles;
+import net.innoventa.tessera.security.access.Targets;
+import org.jmouse.access.jpa.AccessAdministration;
 import net.innoventa.tessera.security.access.ProjectAccess;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
@@ -47,13 +47,12 @@ import java.util.function.Supplier;
 public class ProjectService {
 
     private static final String DEFAULT_KEY_STRATEGY = "PREFIXED_SEQUENCE";
-    private static final String ADMINISTRATOR_ROLE_NAME = "Administrator";
     private static final String DEFAULT_ISSUE_TYPE_SCHEME_ID = "scheme-issue-type-default";
     private static final String DEFAULT_WORKFLOW_SCHEME_ID = "scheme-workflow-default";
 
     private final ProjectRepository           projectRepository;
-    private final ProjectMembershipRepository membershipRepository;
-    private final ProjectRoleRepository       projectRoleRepository;
+
+
     private final IssueTypeSchemeRepository   issueTypeSchemeRepository;
     private final WorkflowSchemeRepository    workflowSchemeRepository;
     private final MemberRepository            memberRepository;
@@ -62,7 +61,7 @@ public class ProjectService {
     private final IssueKeyAllocator           issueKeyAllocator;
     private final BoardProvisioner            boardProvisioner;
     private final ProjectAccess               projectAccess;
-    private final LocalAuthorizationMirror    grants;
+    private final AccessAdministration        access;
     private final Supplier<String>            idGenerator;
 
     @Transactional
@@ -99,21 +98,16 @@ public class ProjectService {
         // the single stored representation of "this project plans in sprints" (ADR-0015).
         boardProvisioner.provision(project, request.boardScopeStrategy());
 
-        ProjectRole administrator = projectRoleRepository.findByName(ADMINISTRATOR_ROLE_NAME)
-            .orElseThrow(() -> new ResourceNotFoundException("Administrator role not seeded"));
-
-        membershipRepository.save(ProjectMembership.builder()
-            .id(idGenerator.get())
-            .projectId(project.getId())
-            .memberId(creator.getId())
-            .roleId(administrator.getId())
-            .build());
-
-        // ⚠️ The grant that actually decides anything. Without this line the creator would own a project
-        // they cannot open: `@RequiresAccess` resolves from the engine's rows, and a membership row is
-        // no longer one of them.
-        grants.assignRole(
-            creator.getId(), project.getId(), ADMINISTRATOR_ROLE_NAME, creator.getId());
+        // ⚠️ The grant IS the membership. There is no longer a `project_memberships` row beside it to
+        // keep in step — without this line the creator would own a project they cannot open, because
+        // `@RequiresAccess` resolves from the engine's rows and nothing else does.
+        access.assign(
+            creator.getId(),
+            Roles.PROJECT_ADMINISTRATOR,
+            Targets.projectScope(project.getId()),
+            "PROJECT_CREATED",
+            creator.getId(),
+            null);
 
         return toResponse(project, creator);
     }
@@ -135,10 +129,13 @@ public class ProjectService {
      */
     @Transactional(readOnly = true)
     public List<ProjectResponse> list(Member member) {
-        List<String> projectIds = membershipRepository.findByMemberId(member.getId()).stream()
-            .map(ProjectMembership::getProjectId)
-            .distinct()
-            .toList();
+        // ⚠️ Asked of the grants, not of a membership table — so a project reached through a personal
+        // grant or an installation-wide role appears here exactly as one reached through membership.
+        // `visibleProjectIds` answers an empty list for somebody who browses everything, which is what
+        // `browsesEveryProject` is for; that distinction lives in ProjectAccess rather than here.
+        List<String> projectIds = projectAccess.browsesEveryProject(member)
+            ? projectRepository.findAll().stream().map(Project::getId).toList()
+            : projectAccess.visibleProjectIds(member);
 
         if (projectIds.isEmpty()) {
             return List.of();

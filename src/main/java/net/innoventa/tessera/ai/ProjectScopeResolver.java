@@ -2,8 +2,8 @@ package net.innoventa.tessera.ai;
 
 import lombok.RequiredArgsConstructor;
 import net.innoventa.tessera.domain.Project;
-import net.innoventa.tessera.domain.ProjectMembership;
-import net.innoventa.tessera.repository.ProjectMembershipRepository;
+import net.innoventa.tessera.security.access.ProjectAccess;
+import net.innoventa.tessera.service.MemberService;
 import net.innoventa.tessera.repository.ProjectRepository;
 import org.jmouse.ai.CallerIdentity;
 import org.jmouse.ai.InvocationScope;
@@ -39,8 +39,10 @@ import java.util.stream.Collectors;
  *       leaves a model to guess again.
  * </ul>
  *
- * <p>⚠️ Visibility is membership: a caller who is not a member of a project does not see it here at
- * all, which is the same answer {@code ProjectService.get} gives and for the same reason.
+ * <p>⚠️ <strong>Visibility is what the grants say, and there is no membership table left to ask.</strong>
+ * A caller who holds nothing at a project does not see it here at all — the same answer
+ * {@code ProjectService.get} gives, from the same rows, which is what keeps a tool and a route from
+ * disagreeing about which projects exist.
  */
 @Component
 @RequiredArgsConstructor
@@ -49,8 +51,9 @@ public class ProjectScopeResolver implements ScopeResolver {
     /** Tessera's word for a place, as every refusal and every echo says it to a model. */
     public static final String KIND = "project";
 
-    private final ProjectRepository           projectRepository;
-    private final ProjectMembershipRepository membershipRepository;
+    private final ProjectRepository projectRepository;
+    private final ProjectAccess     projectAccess;
+    private final MemberService     members;
 
     @Override
     public InvocationScope resolve(CallerIdentity caller, ToolAction action, String requested) {
@@ -64,10 +67,9 @@ public class ProjectScopeResolver implements ScopeResolver {
     }
 
     private List<Project> visibleProjects(CallerIdentity caller) {
-        List<String> projectIds = membershipRepository.findByMemberId(caller.callerId()).stream()
-                .map(ProjectMembership::getProjectId)
-                .distinct()
-                .toList();
+        // Asked of the grants rather than of a membership table — that table is gone (V000014), and a
+        // project reached through a personal grant was never in it to begin with.
+        List<String> projectIds = projectAccess.visibleProjectIds(members.requireMember(caller.callerId()));
 
         return projectIds.isEmpty() ? List.of() : projectRepository.findByIdInOrderByKeyAsc(projectIds);
     }

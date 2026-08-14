@@ -64,7 +64,6 @@ class ProjectIssueTypeServiceTest {
     @Mock private IssueTypeSchemeItemRepository issueTypeSchemeItemRepository;
     @Mock private IssueTypeRepository issueTypeRepository;
     @Mock private ProjectService projectService;
-    @Mock private ProjectPermissionService projectPermissionService;
     @Mock private MemberService memberService;
 
     @InjectMocks private ProjectIssueTypeService projectIssueTypeService;

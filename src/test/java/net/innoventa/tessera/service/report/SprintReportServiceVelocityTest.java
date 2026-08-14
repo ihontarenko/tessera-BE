@@ -8,7 +8,6 @@ import net.innoventa.tessera.repository.IssueTypeRepository;
 import net.innoventa.tessera.repository.MemberRepository;
 import net.innoventa.tessera.repository.StatusRepository;
 import net.innoventa.tessera.service.MemberService;
-import net.innoventa.tessera.service.ProjectPermissionService;
 import net.innoventa.tessera.service.ProjectService;
 import net.innoventa.tessera.service.SprintService;
 import org.junit.jupiter.api.BeforeEach;
@@ -65,8 +64,6 @@ class SprintReportServiceVelocityTest {
     private SprintService sprintService;
     @Mock
     private ProjectService projectService;
-    @Mock
-    private ProjectPermissionService projectPermissionService;
     @Mock
     private MemberService memberService;
     @Mock

@@ -2,8 +2,6 @@ package net.innoventa.tessera.ai;
 
 import lombok.RequiredArgsConstructor;
 import net.innoventa.tessera.domain.Member;
-import net.innoventa.tessera.domain.ProjectMembership;
-import net.innoventa.tessera.repository.ProjectMembershipRepository;
 import net.innoventa.tessera.security.access.ProjectAccess;
 import net.innoventa.tessera.service.MemberService;
 import org.jmouse.ai.CallerIdentity;
@@ -47,17 +45,15 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class TesseraToolAuthorizer implements ToolAuthorizer {
 
-    private final ProjectAccess               projectAccess;
-    private final MemberService               members;
-    private final ProjectMembershipRepository memberships;
+    private final ProjectAccess projectAccess;
+    private final MemberService members;
 
     @Override
     public boolean permits(CallerIdentity caller, ToolAction action) {
         Member member = members.requireMember(caller.callerId());
 
-        return memberships.findByMemberId(caller.callerId()).stream()
-                .map(ProjectMembership::getProjectId)
-                .distinct()
+        // Every project the caller can reach, from the grants — there is no membership table to ask.
+        return projectAccess.visibleProjectIds(member).stream()
                 .anyMatch(projectId ->
                         projectAccess.holds(member, projectId, action.requiredPermission()));
     }
