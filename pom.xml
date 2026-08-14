@@ -27,8 +27,6 @@
         <springdoc.version>2.5.0</springdoc.version>
         <testcontainers.version>1.19.8</testcontainers.version>
         <jmouse.el.version>1.0.0-Stable_20260728</jmouse.el.version>
-        <!-- Overridable on the command line: `-DskipFrontend=true` skips the SPA bundle step. -->
-        <skipFrontend>false</skipFrontend>
     </properties>
 
     <dependencyManagement>
@@ -235,57 +233,6 @@
                         </path>
                     </annotationProcessorPaths>
                 </configuration>
-            </plugin>
-
-            <!-- Builds the standalone Tessera/UI app and drops its output into this backend's static
-                 resources, so `mvn spring-boot:run` (and `mvn package`) serves the freshly built SPA
-                 alongside the API on port 8100 — the same pattern Identity uses. This is ADDITIVE:
-                 UI/ stays a full standalone app with its own Vite dev server (`npm run dev`, HMR on
-                 5050); the bundle is just the one-command production-like run. All three goals bind
-                 to generate-resources (before compile), so static/ is always rebuilt from the current
-                 UI/src. Vite's outDir (UI/vite.config.ts) points back here at
-                 ../BE/src/main/resources/static — this backend never reaches into UI, UI writes here.
-                 Node/npm are pinned and downloaded into UI/node (gitignored), not taken from PATH. -->
-            <plugin>
-                <groupId>com.github.eirslett</groupId>
-                <artifactId>frontend-maven-plugin</artifactId>
-                <version>1.15.1</version>
-                <configuration>
-                    <workingDirectory>../UI</workingDirectory>
-                    <!-- `-DskipFrontend=true` compiles the backend without rebuilding the SPA — a fast
-                         inner loop for Java-only changes. Default (false) still bundles the UI. -->
-                    <skip>${skipFrontend}</skip>
-                </configuration>
-                <executions>
-                    <execution>
-                        <id>install-node-and-npm</id>
-                        <goals>
-                            <goal>install-node-and-npm</goal>
-                        </goals>
-                        <configuration>
-                            <nodeVersion>v24.15.0</nodeVersion>
-                            <npmVersion>11.12.1</npmVersion>
-                        </configuration>
-                    </execution>
-                    <execution>
-                        <id>npm-install</id>
-                        <goals>
-                            <goal>npm</goal>
-                        </goals>
-                        <configuration>
-                            <arguments>install</arguments>
-                        </configuration>
-                    </execution>
-                    <execution>
-                        <id>npm-build</id>
-                        <goals>
-                            <goal>npm</goal>
-                        </goals>
-                        <configuration>
-                            <arguments>run build</arguments>
-                        </configuration>
-                    </execution>
-                </executions>
             </plugin>
         </plugins>
     </build>

@@ -27,8 +27,3 @@ output/
 *sensitive.yml
 *public.properties
 *.db
-
-/H2
-
-# Built SPA — the frontend-maven-plugin (see pom.xml) rebuilds this from Tessera/UI on every build.
-src/main/resources/static/

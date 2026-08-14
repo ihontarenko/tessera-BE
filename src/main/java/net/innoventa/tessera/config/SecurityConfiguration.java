@@ -47,19 +47,11 @@ public class SecurityConfiguration {
         httpSecurity
             .csrf(csrf -> csrf.disable())
             .authorizeHttpRequests(authorize -> authorize
+                // This backend serves an API and nothing else. Tessera/UI is a separate application
+                // on its own origin, so there is no shell to let through unauthenticated and no
+                // client-side route for this filter chain to know about — the browser never asks
+                // this port for one.
                 .requestMatchers("/actuator/health").permitAll()
-                // The bundled React shell (built into src/main/resources/static by the
-                // frontend-maven-plugin, see pom.xml) must load without a token; its own /api/**
-                // calls stay authenticated below. The SPA obtains a token via OIDC Authorization
-                // Code + PKCE against Identity, exactly as Moneta and Central already do.
-                .requestMatchers("/", "/index.html", "/assets/**", "/favicon.ico", "/favicon.svg", "/vite.svg")
-                .permitAll()
-                // Client-side SPA routes (React Router owns them, SinglePageApplicationController
-                // forwards them to index.html). A browser hitting one directly must receive the shell
-                // so the app can boot and run its own OIDC sign-in — reachable without a token. The
-                // shell's own /api/** calls stay authenticated below.
-                .requestMatchers("/dashboard", "/projects/**", "/boards/**", "/backlog/**", "/issues/**", "/settings/**")
-                .permitAll()
                 .anyRequest().authenticated())
             .oauth2ResourceServer(resourceServer -> resourceServer.jwt(
                 jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter)));
