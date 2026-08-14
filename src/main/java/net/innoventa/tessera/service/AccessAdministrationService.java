@@ -16,6 +16,7 @@ import net.innoventa.tessera.exception.ResourceNotFoundException;
 import net.innoventa.tessera.repository.MemberRepository;
 import net.innoventa.tessera.repository.ProjectRepository;
 import net.innoventa.tessera.security.Permissions;
+import net.innoventa.tessera.security.access.Targets;
 import net.innoventa.tessera.security.access.TesseraScope;
 import org.jmouse.access.ScopeCatalog;
 import org.jmouse.access.ScopeKind;
@@ -122,6 +123,117 @@ public class AccessAdministrationService {
                 .toList());
 
         return viewOf(existing.name(), existing.assignableAt(), bundle);
+    }
+
+    // ── Who holds what ────────────────────────────────────────────────────────
+
+    /**
+     * Give somebody a role, at the installation or at one project.
+     *
+     * <p>⚠️ <strong>Where it may be handed out is the role's own answer, not the caller's.</strong>
+     * {@code assignableAt} comes from the policy document for exactly this reason: a screen that let
+     * {@code PROJECT_ADMINISTRATOR} be granted at {@code @GLOBAL} would make one click equivalent to
+     * administering every project there will ever be — including the ones nobody has made yet.
+     */
+    @Transactional
+    public void assign(String memberId, String roleName, String projectId, String by) {
+        Member member = members.findById(memberId)
+                .orElseThrow(() -> new ResourceNotFoundException("Member not found: " + memberId));
+
+        access.assign(member.getId(), roleName, placeFor(roleName, projectId), "DIRECT", by, null);
+    }
+
+    @Transactional
+    public void unassign(String memberId, String roleName, String projectId) {
+        access.unassign(memberId, roleName, placeFor(roleName, projectId));
+    }
+
+    /**
+     * Where a role of this name may be assigned, given what the caller asked for.
+     *
+     * <p>Both mistakes are refused rather than quietly corrected. Handing a project role out globally is
+     * a widening nobody asked for; pinning a global role to one project is a grant that confers nothing
+     * where the caller expected it to confer everything, which is worse for being invisible.
+     */
+    private ScopeReference placeFor(String roleName, String projectId) {
+        AccessAdministration.RoleView role = requireRole(roleName);
+        boolean                       global = TesseraScope.GLOBAL.name().equals(role.assignableAt());
+
+        if (global && projectId != null) {
+            throw new BusinessRuleViolationException(
+                    "'" + roleName + "' is assignable installation-wide, so it cannot be given inside a "
+                    + "single project — held there it would confer nothing.");
+        }
+
+        if (!global && (projectId == null || projectId.isBlank())) {
+            throw new BusinessRuleViolationException(
+                    "'" + roleName + "' is assignable at a project, so it needs one. Granted "
+                    + "installation-wide it would apply to every project there will ever be.");
+        }
+
+        return global ? Targets.installationScope() : Targets.projectScope(projectId);
+    }
+
+    // ── What one person holds personally ──────────────────────────────────────
+
+    /**
+     * One permission handed to, or taken from, one person — over the top of whatever their roles say.
+     *
+     * <p>⚠️ <strong>A deny is the only way to take something away without editing the role that gives
+     * it.</strong> It wins over every allow from anywhere, so this is the sharpest instrument on the
+     * screen and the reason {@code reason} is required rather than optional.
+     */
+    @Transactional
+    public void grant(
+            String memberId, String permission, boolean allowed, String projectId, String reason,
+            String by) {
+
+        members.findById(memberId)
+                .orElseThrow(() -> new ResourceNotFoundException("Member not found: " + memberId));
+
+        requireKnownPermission(permission);
+
+        if (reason == null || reason.isBlank()) {
+            throw new BusinessRuleViolationException(
+                    "A personal grant needs a reason. It outlives whoever made it, and one nobody can "
+                    + "explain is a refusal somebody will spend an afternoon on a year from now.");
+        }
+
+        access.grant(memberId, permission, placeOf(projectId),
+                allowed ? AccessAdministration.Effect.ALLOW : AccessAdministration.Effect.DENY,
+                reason, by, null);
+    }
+
+    @Transactional
+    public void ungrant(String memberId, String permission, String projectId) {
+        access.ungrant(memberId, permission, placeOf(projectId));
+    }
+
+    /**
+     * ⚠️ <strong>A personal grant may be made at either floor, unlike a role assignment.</strong> A role
+     * carries a scope kind that decides where it means anything; a bare permission does not, so "this
+     * person may do X in this project" and "this person may do X anywhere" are both sentences somebody
+     * might legitimately want to write.
+     */
+    private ScopeReference placeOf(String projectId) {
+        return projectId == null || projectId.isBlank()
+                ? Targets.installationScope()
+                : Targets.projectScope(projectId);
+    }
+
+    private AccessAdministration.RoleView requireRole(String roleName) {
+        return access.roles().stream()
+                .filter(role -> role.name().equals(roleName))
+                .findFirst()
+                .orElseThrow(() -> new ResourceNotFoundException("Role not found: " + roleName));
+    }
+
+    private void requireKnownPermission(String permission) {
+        if (!Permissions.all().contains(permission)) {
+            throw new BusinessRuleViolationException(
+                    "'" + permission + "' is not a permission this build knows about, so granting it "
+                    + "would confer nothing and denying it would refuse nothing.");
+        }
     }
 
     // ── Reads ─────────────────────────────────────────────────────────────────

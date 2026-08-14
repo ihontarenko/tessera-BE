@@ -103,6 +103,16 @@ tessera:
     # allow-list.
     audience: ${TESSERA_AUDIENCE:tessera}
 
+    # Where a Model Context Protocol client is sent to get a token, and what this server calls itself
+    # when it asks for one. Published at /.well-known/oauth-protected-resource — see
+    # ProtectedResourceMetadataConfiguration for the four steps of the handshake.
+    #
+    # ⚠️ `issuer` is Identity's base URL and NOT the jwk-set-uri above with its path trimmed. They agree
+    # today and are different facts: a client needs the issuer to discover the authorization endpoints,
+    # and an installation may perfectly well fetch keys from somewhere else.
+    issuer: ${TESSERA_IDENTITY_ISSUER:http://localhost:9090}
+    resource: ${TESSERA_RESOURCE:http://localhost:8100}
+
   bootstrap:
     owner: ${TESSERA_BOOTSTRAP_OWNER:SU}
 

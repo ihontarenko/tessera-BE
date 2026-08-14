@@ -3,17 +3,26 @@ package net.innoventa.tessera.controller;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import net.innoventa.tessera.dto.access.AccessAdministrationDtos.AccessOverview;
+import net.innoventa.tessera.dto.access.AccessAdministrationDtos.AssignRoleRequest;
+import net.innoventa.tessera.dto.access.AccessAdministrationDtos.GrantPermissionRequest;
+import net.innoventa.tessera.dto.access.AccessAdministrationDtos.RevokePermissionRequest;
 import net.innoventa.tessera.dto.access.AccessAdministrationDtos.RoleView;
 import net.innoventa.tessera.dto.access.AccessAdministrationDtos.SetBundleRequest;
 import net.innoventa.tessera.security.Permissions;
 import net.innoventa.tessera.security.access.Scopes;
 import net.innoventa.tessera.service.AccessAdministrationService;
 import org.jmouse.access.enforcement.RequiresAccess;
+import org.springframework.http.HttpStatus;
+import org.springframework.security.core.annotation.AuthenticationPrincipal;
+import org.springframework.security.oauth2.jwt.Jwt;
+import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PathVariable;
+import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
+import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
@@ -59,5 +68,64 @@ public class AccessAdministrationController {
     @PutMapping("/roles/{roleName}/bundle")
     public RoleView setBundle(@PathVariable String roleName, @Valid @RequestBody SetBundleRequest request) {
         return accessAdministrationService.setBundle(roleName, request.bundle());
+    }
+
+    // ── Who holds what ────────────────────────────────────────────────────────
+
+    /**
+     * ⚠️ <strong>The screen would be a viewer without these.</strong> Reading who holds what and being
+     * able to change it are the same job: an administrator who can see that somebody is missing a role
+     * and has to go and edit a project's people screen to fix it is being shown a problem and handed no
+     * tool. Project membership still has its own screen — this is the installation-wide one, and it can
+     * reach a project too, because "give this person that role over there" is exactly the request
+     * somebody brings to it.
+     */
+    @PostMapping("/assignments")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void assign(@AuthenticationPrincipal Jwt jwt, @Valid @RequestBody AssignRoleRequest request) {
+        accessAdministrationService.assign(
+                request.memberId(), request.roleName(), request.projectId(), callerId(jwt));
+    }
+
+    @DeleteMapping("/assignments")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void unassign(@Valid @RequestBody AssignRoleRequest request) {
+        accessAdministrationService.unassign(
+                request.memberId(), request.roleName(), request.projectId());
+    }
+
+    // ── What one person holds personally ──────────────────────────────────────
+
+    /**
+     * ⚠️ <strong>A deny beats every role that grants it.</strong> This is the sharpest thing on the
+     * screen: it is how one person loses one power without the role that gives it to everybody else
+     * being touched — and it is why the service refuses one without a reason.
+     */
+    @PostMapping("/grants")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void grant(
+            @AuthenticationPrincipal Jwt jwt, @Valid @RequestBody GrantPermissionRequest request) {
+
+        accessAdministrationService.grant(
+                request.memberId(), request.permission(), request.allowed(), request.projectId(),
+                request.reason(), callerId(jwt));
+    }
+
+    @DeleteMapping("/grants")
+    @ResponseStatus(HttpStatus.NO_CONTENT)
+    public void ungrant(@Valid @RequestBody RevokePermissionRequest request) {
+        accessAdministrationService.ungrant(
+                request.memberId(), request.permission(), request.projectId());
+    }
+
+    /**
+     * Who made the change, recorded beside it.
+     *
+     * <p>The identity-provider subject rather than the member id, because this column is read by a
+     * person during an incident and {@code SU} means something to them where a UUID does not. It is
+     * provenance, never an identity anything resolves.
+     */
+    private String callerId(Jwt jwt) {
+        return jwt == null ? null : jwt.getSubject();
     }
 }

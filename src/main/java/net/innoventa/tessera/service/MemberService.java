@@ -70,8 +70,7 @@ public class MemberService {
     public List<MemberSummary> search(String query) {
         List<Member> members = (query == null || query.isBlank())
             ? memberRepository.findAllByOrderByDisplayNameAsc()
-            : memberRepository.findByDisplayNameContainingIgnoreCaseOrEmailContainingIgnoreCaseOrSubjectContainingIgnoreCaseOrderByDisplayNameAsc(
-                query, query, query);
+            : memberRepository.search(query);
 
         return members.stream().map(MemberSummary::from).toList();
     }

@@ -171,4 +171,28 @@ policy "tessera" {
         @PROJECT  place  parameter=projectId
         @SELF     'own-rows'
     }
+
+    # ── Who holds the way back in ─────────────────────────────────────────────
+    #
+    # The one assignment written down rather than made on a screen, because it is
+    # the one that cannot be made on a screen: the screen is behind it.
+    #
+    # ⚠️ THE HANDLE IS RESOLVED, AND IT HAS TO BE. `tessera.bootstrap.owner` is
+    # whatever a person can write down BEFORE anybody has signed in — a member id, an
+    # identity-provider subject (`SU`), or an email. Written straight through it
+    # produced a row with subject_id = 'SU', and every grant here is keyed on a
+    # MEMBER ID — so it parsed, projected, appeared on the access screen, and granted
+    # ABSOLUTELY NOTHING. `PolicySeedStep` resolves it now and withdraws that row.
+    #
+    # ⚠️ AND IT IS APPLIED TWICE, because there are two moments it can be true.
+    # Members arrive from Identity on first sign-in and the seed runs at the first
+    # start, so whichever comes first has to work: the seed grants it if the owner
+    # already exists, and `MemberProvisioner` grants it the moment they sign in. One
+    # rule — "the configured owner holds it" — with two trigger points.
+    #
+    # ⚠️ An owner who never signs in holds nothing, and the boot says so rather than
+    # leaving a row that looks like a grant.
+    assign subject ${tessera.bootstrap.owner} {
+        grants GLOBAL_ACCESS_ADMINISTRATOR @GLOBAL
+    }
 }

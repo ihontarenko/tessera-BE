@@ -55,6 +55,35 @@ public final class AccessAdministrationDtos {
     public record SetBundleRequest(List<BundleEntryView> bundle) {}
 
     /**
+     * Give somebody a role, or take it back.
+     *
+     * <p>⚠️ <strong>{@code projectId} is null for an installation-wide assignment and required for a
+     * project one</strong>, and the service refuses the two mistakes that would otherwise be silent: a
+     * project role handed out globally, and a global role pinned to one project. The role's own
+     * {@code assignableAt} is what decides which is which — it comes from the policy document precisely
+     * so a screen cannot widen it.
+     */
+    public record AssignRoleRequest(String memberId, String roleName, String projectId) {}
+
+    /**
+     * Hand one permission to one person, or take one away from them, at one place.
+     *
+     * <p>⚠️ <strong>A DENY beats every role that grants it, from anywhere.</strong> That is what this
+     * exists for — taking something away from one person without editing the role that gives it to
+     * everybody else — and it is why {@code reason} is not decoration: a denial nobody can explain is a
+     * support ticket that outlives whoever wrote it.
+     */
+    public record GrantPermissionRequest(
+            String  memberId,
+            String  permission,
+            boolean allowed,
+            String  projectId,
+            String  reason) {}
+
+    /** Take back a personal allow or deny, which restores whatever a role was already saying. */
+    public record RevokePermissionRequest(String memberId, String permission, String projectId) {}
+
+    /**
      * One person's hold on one role, at one place.
      *
      * @param project where it was assigned, or null for an installation-wide holding

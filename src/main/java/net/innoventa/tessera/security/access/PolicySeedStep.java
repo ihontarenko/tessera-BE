@@ -2,6 +2,7 @@ package net.innoventa.tessera.security.access;
 
 import lombok.RequiredArgsConstructor;
 import net.innoventa.tessera.bootstrap.BootstrapStep;
+import net.innoventa.tessera.domain.Member;
 import org.jmouse.access.PermissionCatalog;
 import org.jmouse.access.ScopeCatalog;
 import org.jmouse.access.ScopeKind;
@@ -85,6 +86,7 @@ public class PolicySeedStep implements BootstrapStep {
     private final PermissionCatalog    permissions;
     private final ScopeCatalog         scopes;
     private final AccessAdministration access;
+    private final MemberHandles        handles;
 
     @Override
     public String key() {
@@ -194,22 +196,72 @@ public class PolicySeedStep implements BootstrapStep {
     // ── Subjects ──────────────────────────────────────────────────────────────
 
     /**
-     * Whatever the document assigns by hand.
+     * Whatever the document assigns by hand — to the member the handle actually names.
      *
-     * <p>⚠️ <strong>Empty today, and the loop is here anyway.</strong> Tessera's members are provisioned
-     * from Identity on first sign-in, so at the moment this file is read there is no identifier the
-     * document could name — see {@code tessera.jmp}'s note on why the installation's first access
-     * administrator is assigned by {@code MemberProvisioner} instead. The day an installation does want
-     * to write one down, this is what reads it, rather than a seeder somebody has to remember to grow.
+     * <h2>⚠️ The resolution is the whole point, and its absence was a real bug</h2>
+     *
+     * <p>A document writes {@code assign subject ${tessera.bootstrap.owner}} and the property says
+     * {@code SU}, because {@code SU} is what a person signs in as and therefore the only thing anybody
+     * can know before the first sign-in. Written straight through, that produced a row with
+     * {@code subject_id = 'SU'} — and every grant in this installation is keyed on a {@link
+     * net.innoventa.tessera.domain.Member}'s identifier, so it granted nothing at all. It parsed, it
+     * projected, it appeared on every screen that lists what a document says, and it decided nothing.
+     *
+     * <p>⚠️ <strong>The permission axis takes no {@code SubjectHandleResolver}</strong> — the library
+     * wires one into the entitlement axis only, which is a gap its own documentation names. Resolving at
+     * seed time is the answer that needs no library change: the seed is what turns a document into rows,
+     * so it is the right place to turn a name into an identifier.
+     *
+     * <p>A handle nobody answers to is <strong>not</strong> written. It is logged as what it is — an
+     * owner who has not signed in yet — and {@code MemberProvisioner} grants it the moment they do.
      */
     private int seedSubjects(AccessPolicy policy) {
         int written = 0;
 
         for (Map.Entry<String, BoundSubject> held : policy.subjects().entrySet()) {
-            written += seedOneSubject(held.getKey(), held.getValue());
+            String  handle = held.getKey();
+            Member  member = handles.resolve(handle).orElse(null);
+
+            if (member == null) {
+                LOGGER.warn("The policy document assigns to '{}', and nobody in this installation "
+                            + "answers to that handle yet — so nothing is written for them. It is "
+                            + "granted the moment somebody signs in whose member id, identity-provider "
+                            + "subject or email is '{}'.", handle, handle);
+                continue;
+            }
+
+            withdrawTheUnresolvedHandle(handle, member, held.getValue());
+
+            written += seedOneSubject(member.getId(), held.getValue());
         }
 
         return written;
+    }
+
+    /**
+     * Takes back a row an earlier build of this step wrote under the raw handle.
+     *
+     * <p>⚠️ <strong>The seeder owns every row it ever wrote, including the ones it got wrong.</strong>
+     * Left alone, {@code subject_id = 'SU'} sits in {@code access_role_assignments} forever, granting
+     * nothing and appearing on the access screen as a holding nobody can explain — which is worse than
+     * the original bug, because it looks like an answer.
+     *
+     * <p>It only ever touches the handle the document itself named, so it cannot reach a grant somebody
+     * made deliberately.
+     */
+    private void withdrawTheUnresolvedHandle(String handle, Member member, BoundSubject held) {
+        if (handle.equals(member.getId())) {
+            return;
+        }
+
+        for (BoundAssignment assignment : held.roles()) {
+            if (access.unassign(handle, assignment.roleName(), assignment.at()).changed()) {
+                LOGGER.info("Withdrew the assignment of '{}' to '{}', which was written under the raw "
+                            + "handle rather than the member id and therefore granted nothing. It is "
+                            + "re-written below against {}.",
+                        assignment.roleName(), handle, member.getId());
+            }
+        }
     }
 
     private int seedOneSubject(String subjectId, BoundSubject held) {

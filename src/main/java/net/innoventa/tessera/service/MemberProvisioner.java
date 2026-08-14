@@ -5,10 +5,12 @@ import net.innoventa.tessera.domain.Member;
 import net.innoventa.tessera.domain.SystemRole;
 import net.innoventa.tessera.repository.MemberRepository;
 import net.innoventa.tessera.security.Roles;
+import net.innoventa.tessera.security.access.MemberHandles;
 import net.innoventa.tessera.security.access.Targets;
 import org.jmouse.access.jpa.AccessAdministration;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
@@ -43,7 +45,19 @@ public class MemberProvisioner {
 
     private final MemberRepository      memberRepository;
     private final AccessAdministration  access;
+    private final MemberHandles         handles;
     private final Supplier<String>      idGenerator;
+
+    /**
+     * Who this installation's access administrator is, as a handle a person can write down before
+     * anybody has signed in — a member id, an identity-provider subject, or an email.
+     *
+     * <p>The same property {@code policy/tessera.jmp} names, so the document and this cannot disagree
+     * about who it is. Unset means "whoever arrives first", which is right for a machine somebody is
+     * trying out and wrong for anything else.
+     */
+    @Value("${tessera.bootstrap.owner:}")
+    private String owner;
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public Member provision(String subject, String displayName, String email) {
@@ -57,11 +71,32 @@ public class MemberProvisioner {
             .systemRole(SystemRole.USER)
             .build());
 
-        if (theFirst) {
+        if (isTheOwner(member, theFirst)) {
             grantTheWayBackIn(member);
         }
 
         return member;
+    }
+
+    /**
+     * Whether this brand-new member is the one who gets the way back in.
+     *
+     * <p><strong>One rule with two trigger points, not two rules.</strong> The rule is
+     * <em>{@code tessera.bootstrap.owner} holds it</em>. {@code PolicySeedStep} applies it when that
+     * member already exists at seed time; this applies it when they sign in afterwards — which is the
+     * ordinary case, because members arrive from Identity and the seed runs at the first start.
+     *
+     * <p>⚠️ <strong>The first-member fallback is only for an installation that configured no owner.</strong>
+     * With an owner named, first-in-the-door must NOT get it: on a fresh installation the first person
+     * to sign in is whoever tried the URL, and handing them the access screen because they were quick is
+     * not a way in — it is a race.
+     */
+    private boolean isTheOwner(Member member, boolean theFirst) {
+        if (owner == null || owner.isBlank()) {
+            return theFirst;
+        }
+
+        return handles.names(member, owner);
     }
 
     /**
