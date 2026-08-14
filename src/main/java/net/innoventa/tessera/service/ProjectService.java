@@ -28,6 +28,9 @@ import net.innoventa.tessera.security.access.Targets;
 import org.jmouse.access.jpa.AccessAdministration;
 import net.innoventa.tessera.security.access.ProjectAccess;
 import net.innoventa.tessera.service.configuration.InstanceDefaults;
+import net.innoventa.tessera.service.key.IssueKeyFormat;
+import net.innoventa.tessera.service.key.IssueKeyPattern;
+import net.innoventa.tessera.service.key.IssueKeyStrategies;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -54,7 +57,8 @@ import java.util.function.Supplier;
 @RequiredArgsConstructor
 public class ProjectService {
 
-    private static final String DEFAULT_KEY_STRATEGY = "PREFIXED_SEQUENCE";
+    /** What a new project mints until somebody changes it — {@code TIC-1}, the shape Phase 1 shipped. */
+    private static final String DEFAULT_KEY_STRATEGY = IssueKeyFormat.PREFIXED_SEQUENCE.name();
 
     private final ProjectRepository           projectRepository;
 
@@ -70,6 +74,7 @@ public class ProjectService {
     private final BoardProvisioner            boardProvisioner;
     private final ProjectAccess               projectAccess;
     private final InstanceDefaults            instanceDefaults;
+    private final IssueKeyStrategies          issueKeyStrategies;
     private final AccessAdministration        access;
     private final Supplier<String>            idGenerator;
 
@@ -191,6 +196,12 @@ public class ProjectService {
         // documented cost of storing weights rather than labels (ADR-0019).
         project.setEstimationSchemeId(requireEstimationScheme(request.estimationSchemeId()));
 
+        // ⚠️ Existing keys are never regenerated — this decides the shape of the NEXT one. The
+        // settings screen shows an existing key beside the preview so the divergence is visible
+        // before it happens rather than discovered afterwards.
+        project.setKeyStrategy(requireKeyStrategy(request.keyStrategy()));
+        project.setKeyPattern(requireKeyPattern(request.keyStrategy(), request.keyPattern()));
+
         return toResponse(project, member);
     }
 
@@ -211,6 +222,28 @@ public class ProjectService {
         return workflowSchemeRepository.findById(schemeId)
             .orElseThrow(() -> new ResourceNotFoundException("Workflow scheme not found: " + schemeId))
             .getId();
+    }
+
+    private String requireKeyStrategy(String keyStrategy) {
+        issueKeyStrategies.resolve(keyStrategy);
+
+        return keyStrategy;
+    }
+
+    /**
+     * ⚠️ <strong>A custom pattern is validated to contain {@code ${sequence}}.</strong> The counter is
+     * the sole source of uniqueness (ADR-0003) and nothing downstream checks a key twice, so a
+     * pattern without it would quietly give several issues the same key.
+     *
+     * <p>Every other format ignores the stored pattern, so switching away from CUSTOM does not
+     * require clearing it — and switching back finds it where it was left.
+     */
+    private static String requireKeyPattern(String keyStrategy, String keyPattern) {
+        if (!IssueKeyFormat.CUSTOM.name().equals(keyStrategy)) {
+            return keyPattern;
+        }
+
+        return IssueKeyPattern.requireSequence(keyPattern);
     }
 
     /** ⚠️ Null in, null out — "does not estimate" is an answer this method has to be able to give. */

@@ -4,11 +4,13 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import net.innoventa.tessera.dto.project.CreateProjectRequest;
 import net.innoventa.tessera.dto.project.ProjectIssueTypesResponse;
+import net.innoventa.tessera.dto.project.IssueKeyPreview;
 import net.innoventa.tessera.dto.project.ProjectResponse;
 import net.innoventa.tessera.dto.project.UpdateProjectRequest;
 import net.innoventa.tessera.service.ProjectIssueTypeService;
 import net.innoventa.tessera.security.Permissions;
 import net.innoventa.tessera.security.access.Scopes;
+import net.innoventa.tessera.service.IssueKeyPreviewService;
 import net.innoventa.tessera.service.ProjectService;
 import org.jmouse.access.enforcement.RequiresAccess;
 import org.springframework.http.HttpStatus;
@@ -19,6 +21,7 @@ import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
+import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.ResponseStatus;
 import org.springframework.web.bind.annotation.RestController;
@@ -32,6 +35,7 @@ public class ProjectController {
 
     private final ProjectService projectService;
     private final ProjectIssueTypeService projectIssueTypeService;
+    private final IssueKeyPreviewService  issueKeyPreviewService;
 
     /**
      * ⚠️ <strong>A bare declaration, and it is the honest one.</strong> There is no project to be scoped
@@ -73,6 +77,24 @@ public class ProjectController {
     @RequiresAccess(permission = Permissions.BROWSE_PROJECT, scope = Scopes.PROJECT)
     public ProjectIssueTypesResponse issueTypes(@AuthenticationPrincipal Jwt jwt, @PathVariable String projectId) {
         return projectIssueTypeService.listCreatableIssueTypes(jwt, projectId);
+    }
+
+    /**
+     * What the next key would look like under a format nobody has saved yet.
+     *
+     * <p>⚠️ <strong>{@code ADMINISTER_PROJECT}, not {@code BROWSE_PROJECT}</strong> — it is a
+     * question only the settings screen asks, and answering it for anybody would let a member
+     * probe how many issues a project holds by reading the sequence out of the preview.
+     */
+    @GetMapping("/{projectId}/key-preview")
+    @RequiresAccess(permission = Permissions.ADMINISTER_PROJECT, scope = Scopes.PROJECT)
+    public IssueKeyPreview keyPreview(
+        @PathVariable String projectId,
+        @RequestParam("keyStrategy") String keyStrategy,
+        @RequestParam(value = "keyPattern", required = false) String keyPattern
+    ) {
+        return issueKeyPreviewService.preview(
+            projectService.requireProject(projectId), keyStrategy, keyPattern);
     }
 
     @PutMapping("/{projectId}")

@@ -14,6 +14,10 @@ public record UpdateProjectRequest(
     @NotNull String issueTypeSchemeId,
     @NotNull String workflowSchemeId,
     /** ⚠️ Nullable, and null means "this project does not estimate" — not a scale named None. */
-    String estimationSchemeId
+    String estimationSchemeId,
+    /** One of {@code IssueKeyFormat}; changing it affects issues raised afterwards and nothing else. */
+    @NotNull String keyStrategy,
+    /** ⚠️ Read only by {@code CUSTOM}, and validated to contain {@code ${sequence}} when it is. */
+    String keyPattern
 ) {
 }
