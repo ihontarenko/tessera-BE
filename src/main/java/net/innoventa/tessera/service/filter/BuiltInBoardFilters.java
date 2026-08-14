@@ -31,47 +31,62 @@ public class BuiltInBoardFilters {
      * answers false. The brackets are load-bearing, not decoration.
      */
     private static final List<BoardFilterView> CATALOG = List.of(
+        /*
+         * The board's resting state, and the only entry that is not a narrowing. A board with no filter
+         * chosen used to send no `filter=` at all, which worked but left the toolbar showing nine
+         * toggles and no indication of what was on — "everything" was a state with no control
+         * representing it. It is a filter now: selected by default, and exclusive, because "everything
+         * and only my issues" is not a sentence. `true` is a legal jME predicate, so the server needs
+         * no special case for it either.
+         */
         new BoardFilterView(
+            "all-issues",
+            "board.filter.allIssues",
+            "All issues",
+            "true",
+            true,
+            true),
+        BoardFilterView.of(
             "my-issues",
             "board.filter.myIssues",
             "My issues",
             "issue.assignee == currentMember"),
-        new BoardFilterView(
+        BoardFilterView.of(
             "unassigned",
             "board.filter.unassigned",
             "Unassigned",
             "issue.assignee is null"),
-        new BoardFilterView(
+        BoardFilterView.of(
             "unresolved",
             "board.filter.unresolved",
             "Unresolved",
             "issue.resolution is null"),
-        new BoardFilterView(
+        BoardFilterView.of(
             "recently-updated",
             "board.filter.recentlyUpdated",
             "Recently updated",
             "issue.updatedAt >= (now | minusDays(2))"),
-        new BoardFilterView(
+        BoardFilterView.of(
             "only-bugs",
             "board.filter.onlyBugs",
             "Only bugs",
             "issue.type.name == 'Bug'"),
-        new BoardFilterView(
+        BoardFilterView.of(
             "hot-and-open",
             "board.filter.hotAndOpen",
             "Hot & open",
             "(issue.priority.name in ['Highest','High']) and issue.resolution is null"),
-        new BoardFilterView(
+        BoardFilterView.of(
             "in-progress-mine",
             "board.filter.inProgressMine",
             "My active work",
             "issue.status.category == 'IN_PROGRESS' and issue.assignee == currentMember"),
-        new BoardFilterView(
+        BoardFilterView.of(
             "blocked",
             "board.filter.blocked",
             "Blocked",
             "issue is blocked"),
-        new BoardFilterView(
+        BoardFilterView.of(
             "stale",
             "board.filter.stale",
             "Stale",

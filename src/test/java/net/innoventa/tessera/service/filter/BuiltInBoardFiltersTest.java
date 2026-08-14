@@ -39,6 +39,9 @@ class BuiltInBoardFiltersTest {
 
     /** What each shipped filter must select from {@link BoardFixture}'s four cards. */
     private static final Map<String, Set<String>> EXPECTED = Map.of(
+        // The board's resting state selects everything, which is the one row here that is not a
+        // narrowing — and the one whose expectation has to be revisited when the fixture grows a card.
+        "all-issues", Set.of("issue-1", "issue-2", "issue-3", "issue-4"),
         "my-issues", Set.of("issue-1", "issue-4"),
         "unassigned", Set.of("issue-3"),
         "unresolved", Set.of("issue-1", "issue-2", "issue-3"),
