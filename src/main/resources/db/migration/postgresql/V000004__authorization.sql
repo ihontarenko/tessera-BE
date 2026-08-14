@@ -1,7 +1,7 @@
 -- =============================================================================
 --  V000004  Local authorization — permission catalog, project roles, mappings
 --
---  Universal SQL: H2 / MySQL / PostgreSQL compatible. Identical to the mysql copy
+--  Universal SQL: MySQL / PostgreSQL compatible. Identical to the mysql copy
 --  bar the utf8mb4 header. Identifiers are full words or single-letter
 --  abbreviations (`prp-` = the single-letter form of "Project Role Permission",
 --  the id-ct-01 precedent) — never 2–4 letter truncations.

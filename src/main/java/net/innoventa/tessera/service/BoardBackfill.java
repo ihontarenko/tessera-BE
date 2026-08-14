@@ -17,8 +17,8 @@ import java.util.List;
  * Backfills a {@link net.innoventa.tessera.domain.Board} for every project that predates the board
  * feature (ADR-0009). Boards are provisioned in application code rather than the {@code V000007}
  * migration because a per-board/-column id needs a UUID, and there is no portable cross-dialect UUID
- * generator (H2 {@code RANDOM_UUID()} / PostgreSQL {@code gen_random_uuid()} / MySQL {@code UUID()}
- * all differ) that would keep the {@code h2==postgresql} migration rule intact — see the migration
+ * generator (PostgreSQL {@code gen_random_uuid()} and MySQL {@code UUID()} differ) that would keep
+ * the {@code mysql==postgresql} migration rule intact — see the migration
  * header. New projects seed their board on the creation path ({@link ProjectService}); this catches
  * the ones created before the feature landed.
  * <p>

@@ -3,7 +3,7 @@ SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;
 -- =============================================================================
 --  V000007  Boards — the Kanban board view (Phase 2, ticket 01)
 --
---  Universal SQL: H2 / MySQL / PostgreSQL compatible. Identical to the mysql copy
+--  Universal SQL: MySQL / PostgreSQL compatible. Identical to the mysql copy
 --  bar the utf8mb4 header (there are no backslashes to double here, and no
 --  dialect-specific functions — see the provisioning note below). Enums as
 --  VARCHAR + CHECK; timestamps maintained by the application (@PrePersist /
@@ -21,9 +21,9 @@ SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;
 --  Provisioning note: this migration creates the schema and backfills
 --  `resolved_at` (a pure, dialect-identical UPDATE). It does NOT provision boards
 --  for existing projects in SQL — that needs a fresh id per board/column, and
---  there is no portable cross-dialect UUID generator (H2 RANDOM_UUID(),
---  PostgreSQL gen_random_uuid(), MySQL UUID() all differ), which would break the
---  `h2==postgresql` rule and the `VARCHAR(36)` id width. Board provisioning is
+--  there is no portable cross-dialect UUID generator (PostgreSQL
+--  gen_random_uuid() and MySQL UUID() differ), which would break the
+--  `mysql==postgresql` rule and the `VARCHAR(36)` id width. Board provisioning is
 --  therefore application code: new projects seed a board on creation
 --  (ProjectService), and pre-existing projects are backfilled idempotently at
 --  startup (BoardBackfill) — both through the one BoardProvisioner path.

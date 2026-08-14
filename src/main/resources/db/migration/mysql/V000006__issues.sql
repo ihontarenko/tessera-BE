@@ -3,7 +3,7 @@ SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;
 -- =============================================================================
 --  V000006  Issues + satellites — the working core (tickets 06–13)
 --
---  Universal SQL: H2 / MySQL / PostgreSQL compatible. Identical to the mysql copy
+--  Universal SQL: MySQL / PostgreSQL compatible. Identical to the mysql copy
 --  bar the utf8mb4 header (there are no backslashes to double here). Enums as
 --  VARCHAR + CHECK; timestamps maintained by the application (@PrePersist /
 --  @PreUpdate), not triggers. Identifiers are full words or single-letter

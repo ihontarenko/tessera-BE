@@ -30,7 +30,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 class SavedFilterPresetTest {
 
-    private static final String MIGRATION = "db/migration/h2/V000010__saved_filters_seed.sql";
+    private static final String MIGRATION = "db/migration/mysql/V000010__saved_filters_seed.sql";
 
     private final BoardFilterEvaluator evaluator =
         new BoardFilterEvaluator(new JmeConfiguration().filterExpressionLanguage());

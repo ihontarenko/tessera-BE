@@ -1,7 +1,7 @@
 -- =============================================================================
 --  V000010  Saved-filter presets — the universal filters the product ships
 --
---  Universal SQL: H2 / MySQL / PostgreSQL compatible. Identical to the mysql copy
+--  Universal SQL: MySQL / PostgreSQL compatible. Identical to the mysql copy
 --  bar the utf8mb4 header.
 --
 --  These are GLOBAL rows: null project_id, null owner_member_id. That is the whole

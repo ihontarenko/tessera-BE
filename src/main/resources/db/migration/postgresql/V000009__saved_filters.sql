@@ -1,7 +1,7 @@
 -- =============================================================================
 --  V000009  Saved filters — a named, reusable board filter (ADR-0008)
 --
---  Universal SQL: H2 / MySQL / PostgreSQL compatible. Identical to the mysql copy
+--  Universal SQL: MySQL / PostgreSQL compatible. Identical to the mysql copy
 --  bar the utf8mb4 header (no backslashes to double, no dialect-specific
 --  functions). Enums as VARCHAR + CHECK; timestamps maintained by the application
 --  (@PrePersist / @PreUpdate), not triggers. Identifiers are full words or

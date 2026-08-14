@@ -30,7 +30,7 @@ import java.util.stream.Collectors;
  * only true if joining always ends whatever came before it — which is one operation
  * ({@link #moveToSprint}), not two the callers must remember to pair. That invariant is enforced here
  * rather than in the schema: it spans two tables, and the partial unique index that could express it
- * exists only in PostgreSQL, which would break the {@code h2 == postgresql} rule every migration obeys.
+ * exists only in PostgreSQL, which would break the {@code mysql == postgresql} rule every migration obeys.
  * <p>
  * Entering and leaving a sprint is recorded on the issue's history as an ordinary field change, with
  * the sprint names captured as point-in-time display strings (ADR-0007) — so renaming a sprint later

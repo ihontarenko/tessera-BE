@@ -1,7 +1,7 @@
 -- =============================================================================
 --  V000003  Configuration catalogs + schemes (ADR-0001, ADR-0004, ADR-0005)
 --
---  Universal SQL: H2 / MySQL / PostgreSQL compatible. Enums as VARCHAR + CHECK.
+--  Universal SQL: MySQL / PostgreSQL compatible. Enums as VARCHAR + CHECK.
 --  Identifiers are full words or single-letter abbreviations, never 2–4 letter
 --  truncations (the `itsi-` prefix on issue_type_scheme_items is the single-letter
 --  form of "Issue Type Scheme Item", the id-ct-01 precedent). The mysql copy is

@@ -1,4 +1,0 @@
--- Tessera baseline (V000001).
--- Phase 0 scaffold: the schema starts empty and grows in Phase 1 (Projects & Issues). This anchor
--- establishes the three-dialect migration convention from the first version: h2 and postgresql
--- scripts are identical; mysql is the same script with any backslashes doubled.

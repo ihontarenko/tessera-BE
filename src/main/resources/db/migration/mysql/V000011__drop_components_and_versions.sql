@@ -1,10 +1,10 @@
-﻿SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;
+SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- =============================================================================
 --  V000011  Drop components and versions (ADR-0017)
 --
---  Universal SQL: H2 / MySQL / PostgreSQL compatible. The h2 and postgresql copies
---  are byte-identical; this mysql copy adds only the utf8mb4 header, there being no
+--  Universal SQL: MySQL / PostgreSQL compatible. The postgresql copy
+--  is byte-identical bar this mysql copy's utf8mb4 header, there being no
 --  backslashes here to double.
 --
 --  Components answered "which subsystem owns this?" and versions answered "which

@@ -3,7 +3,7 @@ SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;
 -- =============================================================================
 --  V000002  Members — the local person record (ADR-0002; CONTEXT.md "Member")
 --
---  Universal SQL: H2 / MySQL / PostgreSQL compatible. No database-specific types.
+--  Universal SQL: MySQL / PostgreSQL compatible. No database-specific types.
 --  Enums as VARCHAR + CHECK. updated_at maintained by the application layer
 --  (@PreUpdate), not triggers. The mysql copy is identical bar the utf8mb4 header
 --  and any doubled backslashes (there are none here).

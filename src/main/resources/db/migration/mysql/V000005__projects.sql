@@ -3,7 +3,7 @@ SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;
 -- =============================================================================
 --  V000005  Projects — projects, type→scheme presets, memberships, overrides
 --
---  Universal SQL: H2 / MySQL / PostgreSQL compatible. Identical to the mysql copy
+--  Universal SQL: MySQL / PostgreSQL compatible. Identical to the mysql copy
 --  bar the utf8mb4 header. Project is top-level — no workspace/organization column
 --  (ADR-0002). `project_key` (not `key`, which is reserved) is unique instance-wide.
 --

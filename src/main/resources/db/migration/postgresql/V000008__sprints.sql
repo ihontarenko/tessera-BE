@@ -1,7 +1,7 @@
 -- =============================================================================
 --  V000008  Sprints — the Scrum planning model (Phase 3, tickets 02/03/04)
 --
---  Universal SQL: H2 / MySQL / PostgreSQL compatible. Identical to the mysql copy
+--  Universal SQL: MySQL / PostgreSQL compatible. Identical to the mysql copy
 --  bar the utf8mb4 header (there are no backslashes to double here, and no
 --  dialect-specific functions). Enums as VARCHAR + CHECK; timestamps maintained
 --  by the application (@PrePersist / @PreUpdate), not triggers. Identifiers are
@@ -18,7 +18,7 @@
 --  Three invariants are NOT expressed here and are enforced in the service layer,
 --  because none is portable: "an issue holds at most one membership with a null
 --  `removed_at` in a non-CLOSED sprint" spans two tables and would need a partial
---  unique index (PostgreSQL only, breaking the h2 == postgresql rule); "a project
+--  unique index (PostgreSQL only, breaking the mysql == postgresql rule); "a project
 --  has at most one ACTIVE sprint" needs the same; and "only a hierarchy-level-0
 --  issue may hold membership" reaches through `issues` into `issue_types`. This
 --  mirrors the Phase-2 precedent where "exactly one fallback column per category"
@@ -88,8 +88,8 @@ CREATE INDEX idx_sprint_issues_issue ON sprint_issues (issue_id);
 -- ── boards.scope_strategy ─────────────────────────────────────────────────────
 --  ALL_ISSUES renders the whole project (today's behaviour); ACTIVE_SPRINT renders
 --  exactly the active sprint's current members, and zero cards when none is
---  running. The DEFAULT is what makes this portable in one statement across all
---  three dialects (PostgreSQL and H2 accept `ALTER COLUMN … SET NOT NULL`, MySQL
+--  running. The DEFAULT is what makes this portable in one statement across both
+--  dialects (PostgreSQL accepts `ALTER COLUMN … SET NOT NULL`, MySQL
 --  does not), and it stays on the column as the safe value for any row inserted by
 --  something other than the application.
 ALTER TABLE boards ADD COLUMN scope_strategy VARCHAR(16) NOT NULL DEFAULT 'ALL_ISSUES';
