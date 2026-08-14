@@ -84,17 +84,15 @@ public class IssueSearchService {
         );
 
         List<Issue> issues = found.getContent();
-        List<IssueRowResponse> rows = issueAssembler.rows(issues);
         Map<String, Project> projectsById = projectsOf(issues);
+        // Paired by issue id rather than by position: the assembler happens to preserve order, but a
+        // row landing under the wrong project is not a mistake anyone would notice from the outside.
+        Map<String, String> projectIdByIssueId = issues.stream()
+            .collect(Collectors.toMap(Issue::getId, Issue::getProjectId));
 
-        List<IssueSearchResponse.Item> items = new java.util.ArrayList<>(rows.size());
-        for (int index = 0; index < rows.size(); index++) {
-            Project project = projectsById.get(issues.get(index).getProjectId());
-            items.add(new IssueSearchResponse.Item(
-                new IssueSearchResponse.ProjectRef(project.getId(), project.getKey(), project.getName()),
-                rows.get(index)
-            ));
-        }
+        List<IssueSearchResponse.Item> items = issueAssembler.rows(issues).stream()
+            .map(row -> toItem(row, projectsById.get(projectIdByIssueId.get(row.id()))))
+            .toList();
 
         return new IssueSearchResponse(items, pageNumber, pageSize, found.getTotalElements());
     }
@@ -110,6 +108,13 @@ public class IssueSearchService {
             .distinct()
             .filter(projectId -> projectPermissionService.hasPermission(caller.getId(), projectId, Permissions.BROWSE_PROJECT))
             .toList();
+    }
+
+    private IssueSearchResponse.Item toItem(IssueRowResponse row, Project project) {
+        return new IssueSearchResponse.Item(
+            new IssueSearchResponse.ProjectRef(project.getId(), project.getKey(), project.getName()),
+            row
+        );
     }
 
     private Map<String, Project> projectsOf(List<Issue> issues) {
