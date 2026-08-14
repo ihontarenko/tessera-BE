@@ -11,6 +11,9 @@ public record InstanceDefaultsResponse(
     String defaultIssueTypeSchemeId,
     String defaultIssueTypeSchemeName,
     String defaultWorkflowSchemeId,
-    String defaultWorkflowSchemeName
+    String defaultWorkflowSchemeName,
+    /** ⚠️ Null where new projects do not estimate — an answer, not an absence to be filled in. */
+    String defaultEstimationSchemeId,
+    String defaultEstimationSchemeName
 ) {
 }

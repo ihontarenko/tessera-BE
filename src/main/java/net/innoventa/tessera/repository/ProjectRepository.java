@@ -18,4 +18,7 @@ public interface ProjectRepository extends JpaRepository<Project, String> {
     /** The same question of the other scheme kind — see {@code ConfigurationUsage}. */
     List<Project> findByIssueTypeSchemeIdInOrderByKeyAsc(Collection<String> issueTypeSchemeIds);
 
+    /** And of the third — ⚠️ singular, because a project points at one estimation scale or at none. */
+    List<Project> findByEstimationSchemeIdOrderByKeyAsc(String estimationSchemeId);
+
 }

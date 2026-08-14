@@ -16,6 +16,7 @@ public record ConfigurationResponse(
     List<ResolutionResponse> resolutions,
     List<WorkflowResponse> workflows,
     List<IssueTypeSchemeResponse> issueTypeSchemes,
-    List<WorkflowSchemeResponse> workflowSchemes
+    List<WorkflowSchemeResponse> workflowSchemes,
+    List<EstimationSchemeResponse> estimationSchemes
 ) {
 }

@@ -1,11 +1,13 @@
 package net.innoventa.tessera.service;
 
 import lombok.RequiredArgsConstructor;
+import net.innoventa.tessera.domain.EstimationSchemeItem;
 import net.innoventa.tessera.domain.IssueTypeSchemeItem;
 import net.innoventa.tessera.domain.StatusCategory;
 import net.innoventa.tessera.domain.Transition;
 import net.innoventa.tessera.domain.WorkflowSchemeItem;
 import net.innoventa.tessera.dto.configuration.ConfigurationResponse;
+import net.innoventa.tessera.dto.configuration.EstimationSchemeResponse;
 import net.innoventa.tessera.dto.configuration.IssueTypeResponse;
 import net.innoventa.tessera.dto.configuration.IssueTypeSchemeResponse;
 import net.innoventa.tessera.dto.configuration.PriorityResponse;
@@ -16,6 +18,8 @@ import net.innoventa.tessera.dto.configuration.WorkflowResponse;
 import net.innoventa.tessera.dto.configuration.WorkflowSchemeResponse;
 import net.innoventa.tessera.dto.link.LinkTypeResponse;
 import net.innoventa.tessera.mapper.ConfigurationMapper;
+import net.innoventa.tessera.repository.EstimationSchemeItemRepository;
+import net.innoventa.tessera.repository.EstimationSchemeRepository;
 import net.innoventa.tessera.repository.IssueTypeRepository;
 import net.innoventa.tessera.repository.LinkTypeRepository;
 import net.innoventa.tessera.repository.IssueTypeSchemeItemRepository;
@@ -55,6 +59,8 @@ public class ConfigurationService {
     private final IssueTypeSchemeItemRepository issueTypeSchemeItemRepository;
     private final WorkflowSchemeRepository workflowSchemeRepository;
     private final WorkflowSchemeItemRepository workflowSchemeItemRepository;
+    private final EstimationSchemeRepository estimationSchemeRepository;
+    private final EstimationSchemeItemRepository estimationSchemeItemRepository;
     private final LinkTypeRepository linkTypeRepository;
     private final ConfigurationMapper configurationMapper;
 
@@ -67,8 +73,42 @@ public class ConfigurationService {
             resolutions(),
             workflows(),
             issueTypeSchemes(),
-            workflowSchemes()
+            workflowSchemes(),
+            estimationSchemes()
         );
+    }
+
+    /**
+     * Every estimation scale with its options, in one grouped read.
+     *
+     * <p>⚠️ Both halves of each option travel — the label a person picks and the weight the issue
+     * stores. A client resolving a stored number back to a word needs the pairs, and there is nowhere
+     * else to get them (ADR-0019).
+     */
+    public List<EstimationSchemeResponse> estimationSchemes() {
+        List<net.innoventa.tessera.domain.EstimationScheme> schemes =
+            estimationSchemeRepository.findAllByOrderByNameAsc();
+
+        if (schemes.isEmpty()) {
+            return List.of();
+        }
+
+        Map<String, List<EstimationSchemeItem>> itemsByScheme = estimationSchemeItemRepository
+            .findBySchemeIdInOrderBySequenceAsc(schemes.stream()
+                .map(net.innoventa.tessera.domain.EstimationScheme::getId)
+                .toList())
+            .stream()
+            .collect(Collectors.groupingBy(EstimationSchemeItem::getSchemeId));
+
+        return schemes.stream()
+            .map(scheme -> new EstimationSchemeResponse(
+                scheme.getId(),
+                scheme.getName(),
+                scheme.getDescription(),
+                itemsByScheme.getOrDefault(scheme.getId(), List.of()).stream()
+                    .map(item -> new EstimationSchemeResponse.Item(item.getLabel(), item.getWeight()))
+                    .toList()))
+            .toList();
     }
 
     public List<IssueTypeResponse> issueTypes() {

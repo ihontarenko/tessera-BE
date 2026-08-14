@@ -55,6 +55,16 @@ public class InstanceSettings {
     @Column(name = "default_workflow_scheme_id", nullable = false, length = 36)
     private String defaultWorkflowSchemeId;
 
+    /**
+     * How a new project estimates, or null.
+     *
+     * ⚠️ <strong>Nullable, unlike the other two</strong>, and seeded null. An installation whose default
+     * is "does not estimate" is coherent — nothing here knows how a team works — whereas a project with
+     * no issue-type scheme is a project nothing can be raised in.
+     */
+    @Column(name = "default_estimation_scheme_id", length = 36)
+    private String defaultEstimationSchemeId;
+
     @Column(name = "updated_at", nullable = false)
     private LocalDateTime updatedAt;
 

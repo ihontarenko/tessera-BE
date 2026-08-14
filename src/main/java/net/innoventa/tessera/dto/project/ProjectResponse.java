@@ -2,6 +2,7 @@ package net.innoventa.tessera.dto.project;
 
 import net.innoventa.tessera.domain.BoardScopeStrategy;
 import net.innoventa.tessera.dto.MemberSummary;
+import net.innoventa.tessera.dto.configuration.EstimationSchemeResponse;
 
 import java.time.LocalDateTime;
 import java.util.List;
@@ -23,6 +24,14 @@ public record ProjectResponse(
     MemberSummary lead,
     SchemeSummary issueTypeScheme,
     SchemeSummary workflowScheme,
+    /**
+     * How this project estimates, with its options — or null where it does not.
+     *
+     * ⚠️ <strong>The whole scale travels, not just its name</strong>, because every screen that shows a
+     * story-point value needs the (label, weight) pairs to render {@code 8} as {@code XL} and to offer
+     * the picker. Null means the story-points control disappears rather than showing an empty select.
+     */
+    EstimationSchemeResponse estimationScheme,
     String keyStrategy,
     String keyPattern,
     List<String> myPermissions,

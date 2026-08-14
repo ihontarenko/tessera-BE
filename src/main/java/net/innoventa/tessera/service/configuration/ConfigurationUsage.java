@@ -242,6 +242,21 @@ public class ConfigurationUsage {
                 : null);
     }
 
+    /**
+     * ⚠️ The last-scheme rule is deliberately absent here — see {@code EstimationSchemeWriteService}.
+     * An installation where nobody estimates is coherent, so only the projects and the instance default
+     * hold an estimation scale.
+     */
+    public ConfigurationUsageReport ofEstimationScheme(String schemeId) {
+        List<Project> projects = projectRepository.findByEstimationSchemeIdOrderByKeyAsc(schemeId);
+
+        return report(
+            projectsHolding(projects),
+            schemeId.equals(instanceDefaults.estimationSchemeId())
+                ? Holder.of("instanceDefault", 1, "the scale new projects start on")
+                : null);
+    }
+
     public List<Project> projectsOnIssueTypeScheme(String schemeId) {
         return projectRepository.findByIssueTypeSchemeIdInOrderByKeyAsc(List.of(schemeId));
     }

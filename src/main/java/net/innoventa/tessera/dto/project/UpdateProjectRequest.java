@@ -12,6 +12,8 @@ public record UpdateProjectRequest(
     @NotBlank @Size(max = 128) String name,
     @NotNull String leadMemberId,
     @NotNull String issueTypeSchemeId,
-    @NotNull String workflowSchemeId
+    @NotNull String workflowSchemeId,
+    /** ⚠️ Nullable, and null means "this project does not estimate" — not a scale named None. */
+    String estimationSchemeId
 ) {
 }

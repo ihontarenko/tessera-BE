@@ -13,6 +13,9 @@ import net.innoventa.tessera.dto.project.UpdateProjectRequest;
 import net.innoventa.tessera.exception.BusinessRuleViolationException;
 import net.innoventa.tessera.exception.ResourceNotFoundException;
 import net.innoventa.tessera.repository.BoardRepository;
+import net.innoventa.tessera.dto.configuration.EstimationSchemeResponse;
+import net.innoventa.tessera.repository.EstimationSchemeItemRepository;
+import net.innoventa.tessera.repository.EstimationSchemeRepository;
 import net.innoventa.tessera.repository.IssueTypeSchemeRepository;
 import net.innoventa.tessera.repository.MemberRepository;
 
@@ -57,6 +60,8 @@ public class ProjectService {
 
 
     private final IssueTypeSchemeRepository   issueTypeSchemeRepository;
+    private final EstimationSchemeRepository  estimationSchemeRepository;
+    private final EstimationSchemeItemRepository estimationSchemeItemRepository;
     private final WorkflowSchemeRepository    workflowSchemeRepository;
     private final MemberRepository            memberRepository;
     private final BoardRepository             boardRepository;
@@ -95,6 +100,9 @@ public class ProjectService {
             // configuration screen — with the break arriving at whoever next creates a project.
             .issueTypeSchemeId(requireIssueTypeScheme(instanceDefaults.issueTypeSchemeId()))
             .workflowSchemeId(requireWorkflowScheme(instanceDefaults.workflowSchemeId()))
+            // ⚠️ May be null, which means the project does not estimate — a real answer, and the one a
+            // fresh installation gives until somebody chooses a scale.
+            .estimationSchemeId(requireEstimationScheme(instanceDefaults.estimationSchemeId()))
             .keyStrategy(DEFAULT_KEY_STRATEGY)
             .build());
 
@@ -178,6 +186,11 @@ public class ProjectService {
         project.setIssueTypeSchemeId(requireIssueTypeScheme(request.issueTypeSchemeId()));
         project.setWorkflowSchemeId(requireWorkflowScheme(request.workflowSchemeId()));
 
+        // ⚠️ Changing the scale rewrites NOTHING. Every estimate keeps the number it was stored with,
+        // and any that no longer matches an option on the new scale renders as that number — the
+        // documented cost of storing weights rather than labels (ADR-0019).
+        project.setEstimationSchemeId(requireEstimationScheme(request.estimationSchemeId()));
+
         return toResponse(project, member);
     }
 
@@ -200,6 +213,17 @@ public class ProjectService {
             .getId();
     }
 
+    /** ⚠️ Null in, null out — "does not estimate" is an answer this method has to be able to give. */
+    private String requireEstimationScheme(String schemeId) {
+        if (schemeId == null) {
+            return null;
+        }
+
+        return estimationSchemeRepository.findById(schemeId)
+            .orElseThrow(() -> new ResourceNotFoundException("Estimation scheme not found: " + schemeId))
+            .getId();
+    }
+
     private ProjectResponse toResponse(Project project, Member caller) {
         MemberSummary lead = memberRepository.findById(project.getLeadMemberId())
             .map(MemberSummary::from)
@@ -212,6 +236,20 @@ public class ProjectService {
         SchemeSummary workflowScheme = workflowSchemeRepository.findById(project.getWorkflowSchemeId())
             .map(scheme -> new SchemeSummary(scheme.getId(), scheme.getName()))
             .orElse(null);
+
+        // The whole scale, because every screen showing a story-point value needs the pairs to render a
+        // stored weight as the word somebody picked.
+        EstimationSchemeResponse estimationScheme = project.getEstimationSchemeId() == null ? null
+            : estimationSchemeRepository.findById(project.getEstimationSchemeId())
+                .map(scheme -> new EstimationSchemeResponse(
+                    scheme.getId(),
+                    scheme.getName(),
+                    scheme.getDescription(),
+                    estimationSchemeItemRepository
+                        .findBySchemeIdOrderBySequenceAsc(scheme.getId()).stream()
+                        .map(item -> new EstimationSchemeResponse.Item(item.getLabel(), item.getWeight()))
+                        .toList()))
+                .orElse(null);
 
         // ⚠️ What the interface gates on, and NEVER the authority. It exists so the board stops offering
         // a button the server is about to refuse; every one of these is still checked on the route.
@@ -234,6 +272,7 @@ public class ProjectService {
             lead,
             issueTypeScheme,
             workflowScheme,
+            estimationScheme,
             project.getKeyStrategy(),
             project.getKeyPattern(),
             myPermissions,

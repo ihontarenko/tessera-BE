@@ -45,6 +45,16 @@ public class Project {
     @Column(name = "workflow_scheme_id", nullable = false, length = 36)
     private String workflowSchemeId;
 
+    /**
+     * How this project estimates, or null.
+     *
+     * ⚠️ <strong>Null is "this project does not estimate", not a scheme called None.</strong> The
+     * story-points control disappears entirely rather than offering an empty select, and an unestimated
+     * issue stays valid under every scheme — it is the empty selection, not an option (ADR-0019).
+     */
+    @Column(name = "estimation_scheme_id", length = 36)
+    private String estimationSchemeId;
+
     /** Discriminator naming which {@code IssueKeyStrategy} bean this project uses (ADR-0003). */
     @Column(name = "key_strategy", nullable = false, length = 64)
     private String keyStrategy;

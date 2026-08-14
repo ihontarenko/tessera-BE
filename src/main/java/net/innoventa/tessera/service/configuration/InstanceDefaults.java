@@ -1,12 +1,14 @@
 package net.innoventa.tessera.service.configuration;
 
 import lombok.RequiredArgsConstructor;
+import net.innoventa.tessera.domain.EstimationScheme;
 import net.innoventa.tessera.domain.InstanceSettings;
 import net.innoventa.tessera.domain.IssueTypeScheme;
 import net.innoventa.tessera.domain.WorkflowScheme;
 import net.innoventa.tessera.dto.configuration.InstanceDefaultsRequest;
 import net.innoventa.tessera.dto.configuration.InstanceDefaultsResponse;
 import net.innoventa.tessera.exception.ResourceNotFoundException;
+import net.innoventa.tessera.repository.EstimationSchemeRepository;
 import net.innoventa.tessera.repository.InstanceSettingsRepository;
 import net.innoventa.tessera.repository.IssueTypeSchemeRepository;
 import net.innoventa.tessera.repository.WorkflowSchemeRepository;
@@ -41,6 +43,7 @@ public class InstanceDefaults {
     private final InstanceSettingsRepository instanceSettingsRepository;
     private final IssueTypeSchemeRepository  issueTypeSchemeRepository;
     private final WorkflowSchemeRepository   workflowSchemeRepository;
+    private final EstimationSchemeRepository estimationSchemeRepository;
 
     /** The issue-type scheme a project is created on. */
     public String issueTypeSchemeId() {
@@ -50,6 +53,16 @@ public class InstanceDefaults {
     /** The workflow scheme a project is created on. */
     public String workflowSchemeId() {
         return require().getDefaultWorkflowSchemeId();
+    }
+
+    /**
+     * The scale a project is created on, or null.
+     *
+     * <p>⚠️ <strong>Null is an answer here, unlike the other two</strong> — "new projects do not
+     * estimate" is what an installation that has not decided should say, and it is what V000016 seeds.
+     */
+    public String estimationSchemeId() {
+        return require().getDefaultEstimationSchemeId();
     }
 
     public boolean isDefaultIssueTypeScheme(String schemeId) {
@@ -67,7 +80,9 @@ public class InstanceDefaults {
             settings.getDefaultIssueTypeSchemeId(),
             issueTypeSchemeName(settings.getDefaultIssueTypeSchemeId()),
             settings.getDefaultWorkflowSchemeId(),
-            workflowSchemeName(settings.getDefaultWorkflowSchemeId()));
+            workflowSchemeName(settings.getDefaultWorkflowSchemeId()),
+            settings.getDefaultEstimationSchemeId(),
+            estimationSchemeName(settings.getDefaultEstimationSchemeId()));
     }
 
     @Transactional
@@ -84,11 +99,20 @@ public class InstanceDefaults {
             .orElseThrow(() -> new ResourceNotFoundException(
                 "Workflow scheme not found: " + request.defaultWorkflowSchemeId()));
 
-        LOGGER.info("New projects will start on '{}' and '{}' — existing projects keep the schemes they "
-                    + "were created on", issueTypeScheme.getName(), workflowScheme.getName());
+        // ⚠️ Null is a legitimate answer for this one, and means "new projects do not estimate".
+        String estimationSchemeId = request.defaultEstimationSchemeId() == null ? null
+            : estimationSchemeRepository.findById(request.defaultEstimationSchemeId())
+                .orElseThrow(() -> new ResourceNotFoundException(
+                    "Estimation scheme not found: " + request.defaultEstimationSchemeId()))
+                .getId();
+
+        LOGGER.info("New projects will start on '{}' and '{}', estimating on '{}' — existing projects "
+                    + "keep the schemes they were created on", issueTypeScheme.getName(),
+            workflowScheme.getName(), estimationSchemeName(estimationSchemeId));
 
         settings.setDefaultIssueTypeSchemeId(issueTypeScheme.getId());
         settings.setDefaultWorkflowSchemeId(workflowScheme.getId());
+        settings.setDefaultEstimationSchemeId(estimationSchemeId);
         settings.setUpdatedAt(LocalDateTime.now());
 
         return read();
@@ -114,6 +138,11 @@ public class InstanceDefaults {
 
     private String workflowSchemeName(String schemeId) {
         return workflowSchemeRepository.findById(schemeId).map(WorkflowScheme::getName).orElse(null);
+    }
+
+    private String estimationSchemeName(String schemeId) {
+        return schemeId == null ? null
+            : estimationSchemeRepository.findById(schemeId).map(EstimationScheme::getName).orElse(null);
     }
 
 }

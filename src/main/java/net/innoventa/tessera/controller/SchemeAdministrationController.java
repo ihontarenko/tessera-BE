@@ -3,6 +3,8 @@ package net.innoventa.tessera.controller;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import net.innoventa.tessera.dto.configuration.ConfigurationUsageReport;
+import net.innoventa.tessera.dto.configuration.EstimationSchemeRequest;
+import net.innoventa.tessera.dto.configuration.EstimationSchemeResponse;
 import net.innoventa.tessera.dto.configuration.InstanceDefaultsRequest;
 import net.innoventa.tessera.dto.configuration.InstanceDefaultsResponse;
 import net.innoventa.tessera.dto.configuration.IssueTypeSchemeRequest;
@@ -14,6 +16,7 @@ import net.innoventa.tessera.dto.configuration.WorkflowSchemeResponse;
 import net.innoventa.tessera.security.Permissions;
 import net.innoventa.tessera.security.access.Scopes;
 import net.innoventa.tessera.service.configuration.ConfigurationUsage;
+import net.innoventa.tessera.service.configuration.EstimationSchemeWriteService;
 import net.innoventa.tessera.service.configuration.InstanceDefaults;
 import net.innoventa.tessera.service.configuration.IssueTypeSchemeWriteService;
 import net.innoventa.tessera.service.configuration.WorkflowSchemeWriteService;
@@ -29,13 +32,16 @@ import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
 
 /**
- * Editing both scheme kinds, and the two defaults a new project starts on.
+ * Editing all three scheme kinds, and the defaults a new project starts on.
  *
- * <p>⚠️ <strong>One controller for both kinds, unlike the catalogs.</strong> The catalog controllers are
+ * <p>⚠️ <strong>One controller for every kind, unlike the catalogs.</strong> The catalog controllers are
  * one per family because each family's writes differ — a status has a category question, an issue type
- * has a level one. Schemes have neither: both kinds are written whole, refuse for the same two reasons,
- * and are read by one screen that shows them side by side. Splitting them would produce two files whose
- * only difference is a noun.
+ * has a level one. Schemes have none: all three are written whole and refuse for the same reasons, and
+ * they are read by one screen. Splitting them would produce three files whose only difference is a noun.
+ *
+ * <p>⚠️ <strong>The estimation scale is a scheme like the other two, and that is the point.</strong>
+ * "Custom" needs no code — building a fifth scale is the same create as any other, which is what
+ * ADR-0001 already meant by making a scheme a catalog entity.
  *
  * <p>The defaults live here rather than on their own controller for the same reason they exist at all:
  * they point at schemes, they are what refuses a scheme's deletion, and the screen that edits one edits
@@ -51,10 +57,11 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiresAccess
 public class SchemeAdministrationController {
 
-    private final IssueTypeSchemeWriteService issueTypeSchemeWriteService;
-    private final WorkflowSchemeWriteService  workflowSchemeWriteService;
-    private final ConfigurationUsage          configurationUsage;
-    private final InstanceDefaults            instanceDefaults;
+    private final IssueTypeSchemeWriteService  issueTypeSchemeWriteService;
+    private final WorkflowSchemeWriteService   workflowSchemeWriteService;
+    private final EstimationSchemeWriteService estimationSchemeWriteService;
+    private final ConfigurationUsage           configurationUsage;
+    private final InstanceDefaults             instanceDefaults;
 
     // ── The blast radius, shown permanently ───────────────────────────────────
 
@@ -124,6 +131,36 @@ public class SchemeAdministrationController {
     @RequiresAccess(permission = Permissions.ADMINISTER_CONFIGURATION, scope = Scopes.GLOBAL)
     public void deleteWorkflowScheme(@PathVariable String schemeId) {
         workflowSchemeWriteService.delete(schemeId);
+    }
+
+    // ── Estimation scales ─────────────────────────────────────────────────────
+
+    @GetMapping("/estimation-schemes/{schemeId}/usage")
+    public ConfigurationUsageReport estimationSchemeUsage(@PathVariable String schemeId) {
+        return configurationUsage.ofEstimationScheme(schemeId);
+    }
+
+    @PostMapping("/estimation-schemes")
+    @RequiresAccess(permission = Permissions.ADMINISTER_CONFIGURATION, scope = Scopes.GLOBAL)
+    public EstimationSchemeResponse createEstimationScheme(
+        @Valid @RequestBody EstimationSchemeRequest request) {
+
+        return estimationSchemeWriteService.create(request);
+    }
+
+    @PutMapping("/estimation-schemes/{schemeId}")
+    @RequiresAccess(permission = Permissions.ADMINISTER_CONFIGURATION, scope = Scopes.GLOBAL)
+    public EstimationSchemeResponse updateEstimationScheme(
+        @PathVariable String schemeId, @Valid @RequestBody EstimationSchemeRequest request) {
+
+        return estimationSchemeWriteService.update(schemeId, request);
+    }
+
+    /** ⚠️ Refused while a project estimates on it or it is the instance default — never for being last. */
+    @DeleteMapping("/estimation-schemes/{schemeId}")
+    @RequiresAccess(permission = Permissions.ADMINISTER_CONFIGURATION, scope = Scopes.GLOBAL)
+    public void deleteEstimationScheme(@PathVariable String schemeId) {
+        estimationSchemeWriteService.delete(schemeId);
     }
 
     // ── What a new project starts on ──────────────────────────────────────────
