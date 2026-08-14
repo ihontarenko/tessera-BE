@@ -71,6 +71,16 @@ public class IssueController {
         return issueService.get(jwt, issueId);
     }
 
+    /**
+     * The same issue addressed by key, which is what the issue page's URL carries (ticket 07). It sits
+     * under a literal path segment rather than sharing {@code /api/issues/{id}} and guessing which of
+     * the two an argument is — a route that means one thing cannot be got wrong.
+     */
+    @GetMapping("/api/issues/by-key/{issueKey}")
+    public IssueResponse getByKey(@AuthenticationPrincipal Jwt jwt, @PathVariable String issueKey) {
+        return issueService.getByKey(jwt, issueKey);
+    }
+
     @PutMapping("/api/issues/{issueId}")
     public IssueResponse update(
         @AuthenticationPrincipal Jwt jwt,

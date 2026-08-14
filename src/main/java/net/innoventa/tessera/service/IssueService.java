@@ -21,6 +21,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
+import java.util.Locale;
 import java.util.Objects;
 import java.util.function.Supplier;
 
@@ -132,8 +133,30 @@ public class IssueService {
 
     @Transactional(readOnly = true)
     public IssueResponse get(Jwt jwt, String issueId) {
+        return detail(jwt, requireIssue(issueId));
+    }
+
+    /**
+     * The same read addressed by issue key, for the issue page — whose URL is the key, because the key
+     * is what people already paste to each other (ticket 07). Keys are stored uppercase, so the lookup
+     * uppercases its argument rather than relying on a collation: MySQL would match either way and
+     * PostgreSQL would not.
+     */
+    @Transactional(readOnly = true)
+    public IssueResponse getByKey(Jwt jwt, String issueKey) {
+        Issue issue = issueRepository.findByIssueKey(issueKey.toUpperCase(Locale.ROOT))
+            .orElseThrow(() -> new ResourceNotFoundException("Issue not found: " + issueKey));
+
+        return detail(jwt, issue);
+    }
+
+    /**
+     * Both reads end the same way, and deliberately share the gate rather than each writing it out: a
+     * caller outside the project gets a 404 and one inside it without {@code BROWSE_PROJECT} gets a 403,
+     * so addressing an issue by key can never be the cheaper way in.
+     */
+    private IssueResponse detail(Jwt jwt, Issue issue) {
         Member caller = memberService.resolveMember(jwt);
-        Issue issue = requireIssue(issueId);
         Project project = projectService.requireProject(issue.getProjectId());
         projectPermissionService.requireVisible(caller.getId(), issue.getProjectId());
 
