@@ -27,6 +27,7 @@
         <springdoc.version>2.5.0</springdoc.version>
         <testcontainers.version>1.19.8</testcontainers.version>
         <jmouse.el.version>1.0.0-Stable_20260728</jmouse.el.version>
+        <jmouse.version>1.0.0-b20260802</jmouse.version>
     </properties>
 
     <dependencyManagement>
@@ -131,6 +132,37 @@
             <groupId>org.jmouse</groupId>
             <artifactId>jmouse-el</artifactId>
             <version>${jmouse.el.version}</version>
+        </dependency>
+
+        <!-- The tool mechanism. Tessera contributed nothing to its design, which is the point: if a
+             tracker can get tools and an assistant from a handful of ToolDefinition beans, the
+             abstraction is real, and anything that has to change in the library is the most valuable
+             finding of the whole effort.
+
+             ⚠️ Boot 3.3.2, so there is no jmouse-ai-spring-boot to lean on — every bean is
+             declared by hand in `config/AiConfiguration`, copied from Central's, which is the worked
+             example that arrangement promises. Every module here is plain Java: `jmouse-ai` asks for
+             no Spring, no JPA and no protocol SDK, and `jmouse-ai-provider` speaks
+             java.net.http.HttpClient rather than anything of Spring's. -->
+        <dependency>
+            <groupId>org.jmouse</groupId>
+            <artifactId>jmouse-ai</artifactId>
+            <version>${jmouse.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.jmouse</groupId>
+            <artifactId>jmouse-ai-provider</artifactId>
+            <version>${jmouse.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.jmouse</groupId>
+            <artifactId>jmouse-ai-conversation</artifactId>
+            <version>${jmouse.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.jmouse</groupId>
+            <artifactId>jmouse-ai-jpa</artifactId>
+            <version>${jmouse.version}</version>
         </dependency>
 
         <!-- Testing -->

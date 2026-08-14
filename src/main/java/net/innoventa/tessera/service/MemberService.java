@@ -74,6 +74,25 @@ public class MemberService {
             .orElseThrow(() -> new ResourceNotFoundException("Member not found: " + memberId));
     }
 
+    /**
+     * The member behind an identity-provider subject, for a caller that is not an HTTP request.
+     *
+     * <p>⚠️ <strong>Requires rather than provisions, unlike {@link #resolveMember(Jwt)}.</strong> A
+     * {@code Jwt} carries the claims a new row would be built from — a display name, an email — and a
+     * bare subject carries none of them. Provisioning here would create a member called by its own
+     * subject identifier, which is a row somebody has to go and fix.
+     *
+     * <p>Nothing reaches this without having signed in first: a tool call runs under a session the
+     * person already holds, so the row is always there. If it ever is not, that is the interesting
+     * fact and it should surface rather than be papered over with an empty member.
+     */
+    @Transactional(readOnly = true)
+    public Member requireBySubject(String subject) {
+        return memberRepository.findBySubject(subject)
+            .orElseThrow(() -> new ResourceNotFoundException(
+                "No member has signed in under the subject '" + subject + "'"));
+    }
+
     private Member provision(String subject, String displayName, String email) {
         try {
             // Insert in its own transaction (REQUIRES_NEW) so a losing racer's constraint violation
