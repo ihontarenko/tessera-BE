@@ -27,10 +27,11 @@ public class IssueSearchController {
         @RequestParam(required = false) String projectId,
         @RequestParam(required = false) String statusId,
         @RequestParam(required = false) String assigneeMemberId,
+        @RequestParam(defaultValue = "false") boolean openOnly,
         @RequestParam(defaultValue = "0") int page,
         @RequestParam(defaultValue = "25") int size
     ) {
-        return issueSearchService.search(jwt, text, projectId, statusId, assigneeMemberId, page, size);
+        return issueSearchService.search(jwt, text, projectId, statusId, assigneeMemberId, openOnly, page, size);
     }
 
 }

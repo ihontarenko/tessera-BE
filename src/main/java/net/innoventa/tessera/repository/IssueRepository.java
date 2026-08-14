@@ -27,6 +27,7 @@ public interface IssueRepository extends JpaRepository<Issue, String> {
           and (:projectId is null or issue.projectId = :projectId)
           and (:statusId is null or issue.statusId = :statusId)
           and (:assigneeMemberId is null or issue.assigneeMemberId = :assigneeMemberId)
+          and (:openOnly = false or issue.resolutionId is null)
           and (:text is null or lower(issue.summary) like :text or lower(issue.issueKey) like :text)
         """)
     Page<Issue> search(
@@ -34,6 +35,8 @@ public interface IssueRepository extends JpaRepository<Issue, String> {
         @Param("projectId") String projectId,
         @Param("statusId") String statusId,
         @Param("assigneeMemberId") String assigneeMemberId,
+        /** Open is {@code resolution IS NULL} — the invariant, not a status name (ADR-0004). */
+        @Param("openOnly") boolean openOnly,
         @Param("text") String text,
         Pageable pageable
     );

@@ -59,10 +59,25 @@ public class IssueSearchService {
         String projectId,
         String statusId,
         String assigneeMemberId,
+        boolean openOnly,
         int page,
         int size
     ) {
-        Member caller = memberService.resolveMember(jwt);
+        return search(memberService.resolveMember(jwt), text, projectId, statusId, assigneeMemberId,
+            openOnly, page, size);
+    }
+
+    /** The same, for a caller that is not an HTTP request — see {@code ProjectService.list(Member)}. */
+    public IssueSearchResponse search(
+        Member caller,
+        String text,
+        String projectId,
+        String statusId,
+        String assigneeMemberId,
+        boolean openOnly,
+        int page,
+        int size
+    ) {
         List<String> browsableProjectIds = browsableProjectIds(caller);
 
         int pageNumber = Math.max(page, 0);
@@ -79,6 +94,7 @@ public class IssueSearchService {
             blankToNull(projectId),
             blankToNull(statusId),
             blankToNull(assigneeMemberId),
+            openOnly,
             likePattern(text),
             PageRequest.of(pageNumber, pageSize, Sort.by(Sort.Direction.DESC, "updatedAt"))
         );
