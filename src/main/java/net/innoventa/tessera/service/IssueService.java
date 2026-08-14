@@ -65,7 +65,12 @@ public class IssueService {
 
     @Transactional
     public IssueResponse create(Jwt jwt, String projectId, CreateIssueRequest request) {
-        Member caller = memberService.resolveMember(jwt);
+        return create(memberService.resolveMember(jwt), projectId, request);
+    }
+
+    /** The same, for a caller that is not an HTTP request — see {@code ProjectService.list(Member)}. */
+    @Transactional
+    public IssueResponse create(Member caller, String projectId, CreateIssueRequest request) {
         Project project = projectService.requireProject(projectId);
 
         // The scheme is a constraint, not a suggestion: the dialog offers only what it grants, and a
@@ -118,6 +123,25 @@ public class IssueService {
         String priorityId
     ) {
         memberService.resolveMember(jwt);
+
+        return list(projectId, statusId, assigneeMemberId, issueTypeId, priorityId);
+    }
+
+    /**
+     * The same, for a caller that is not an HTTP request — see {@code ProjectService.list(Member)}.
+     *
+     * <p>⚠️ <strong>It takes no caller at all</strong>, unlike its neighbours, because it never used
+     * one: the listing is the project's and the same for everybody who may see it. An unused parameter
+     * added for symmetry would be a parameter somebody eventually assumes is doing something.
+     */
+    @Transactional(readOnly = true)
+    public List<IssueRowResponse> list(
+        String projectId,
+        String statusId,
+        String assigneeMemberId,
+        String issueTypeId,
+        String priorityId
+    ) {
         projectService.requireProject(projectId);
 
         List<Issue> issues = issueRepository.findByProjectIdOrderByRankAsc(projectId).stream()
@@ -132,7 +156,9 @@ public class IssueService {
 
     @Transactional(readOnly = true)
     public IssueResponse get(Jwt jwt, String issueId) {
-        return detail(jwt, requireIssue(issueId));
+        memberService.resolveMember(jwt);
+
+        return detail(requireIssue(issueId));
     }
 
     /**
@@ -143,19 +169,31 @@ public class IssueService {
      */
     @Transactional(readOnly = true)
     public IssueResponse getByKey(Jwt jwt, String issueKey) {
-        Issue issue = issueRepository.findByIssueKey(issueKey.toUpperCase(Locale.ROOT))
-            .orElseThrow(() -> new ResourceNotFoundException("Issue not found: " + issueKey));
+        memberService.resolveMember(jwt);
 
-        return detail(jwt, issue);
+        return getByKey(issueKey);
     }
 
     /**
-     * Both reads end the same way, and deliberately share the gate rather than each writing it out: a
-     * caller outside the project gets a 404 and one inside it without {@code BROWSE_PROJECT} gets a 403,
-     * so addressing an issue by key can never be the cheaper way in.
+     * The same, for a caller that is not an HTTP request.
+     *
+     * <p>⚠️ <strong>No caller parameter, for the reason {@link #list} has none:</strong> an issue reads
+     * the same to everybody who may read it at all, and who that is has already been decided — by
+     * {@code @RequiresAccess} on the route, or by the dispatcher on a tool call.
      */
-    private IssueResponse detail(Jwt jwt, Issue issue) {
-        memberService.resolveMember(jwt);
+    @Transactional(readOnly = true)
+    public IssueResponse getByKey(String issueKey) {
+        Issue issue = issueRepository.findByIssueKey(issueKey.toUpperCase(Locale.ROOT))
+            .orElseThrow(() -> new ResourceNotFoundException("Issue not found: " + issueKey));
+
+        return detail(issue);
+    }
+
+    /**
+     * Both reads end the same way, and deliberately share it rather than each writing it out: whichever
+     * way an issue is addressed, the answer is assembled once.
+     */
+    private IssueResponse detail(Issue issue) {
         Project project = projectService.requireProject(issue.getProjectId());
 
         return issueAssembler.detail(issue, project);
@@ -163,7 +201,12 @@ public class IssueService {
 
     @Transactional
     public IssueResponse update(Jwt jwt, String issueId, UpdateIssueRequest request) {
-        Member caller = memberService.resolveMember(jwt);
+        return update(memberService.resolveMember(jwt), issueId, request);
+    }
+
+    /** The same, for a caller that is not an HTTP request — see {@code ProjectService.list(Member)}. */
+    @Transactional
+    public IssueResponse update(Member caller, String issueId, UpdateIssueRequest request) {
         Issue issue = requireIssue(issueId);
         Project project = projectService.requireProject(issue.getProjectId());
 
@@ -195,6 +238,19 @@ public class IssueService {
     @Transactional
     public void delete(Jwt jwt, String issueId) {
         memberService.resolveMember(jwt);
+
+        delete(issueId);
+    }
+
+    /**
+     * The same, for a caller that is not an HTTP request.
+     *
+     * <p>⚠️ No caller parameter: deleting an issue records nothing about who did it — the activity log
+     * goes with the issue — so one would be a parameter nothing reads. Who may is decided before this,
+     * on the route or by the dispatcher.
+     */
+    @Transactional
+    public void delete(String issueId) {
         Issue issue = requireIssue(issueId);
 
         // Detach children so the hierarchy does not dangle, then remove every satellite that FK-references

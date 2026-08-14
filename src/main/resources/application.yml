@@ -58,8 +58,13 @@ spring:
     # not theoretical — it is what made the board hide every card until a filter was applied, because
     # `matchedCardIds` (null = "no filter was evaluated") simply was not in the payload. A nullable field
     # is part of the contract, so it is sent.
-    serialization:
-      write-dates-as-timestamps: false
+    # ⚠️ Jackson 3 moved WRITE_DATES_AS_TIMESTAMPS out of SerializationFeature into DateTimeFeature, so
+    # it lives under `datatype.datetime` now — and the old `serialization.write-dates-as-timestamps` key
+    # is simply ignored rather than rejected. Left where it was, every date in the API would have
+    # flipped to an epoch number at once, and the client parses them as ISO-8601 strings.
+    datatype:
+      datetime:
+        write-dates-as-timestamps: false
     deserialization:
       fail-on-unknown-properties: false
     time-zone: UTC
@@ -97,6 +102,9 @@ tessera:
     # Central, Tessera is only ever called by its own frontend, so one fixed value, not an
     # allow-list.
     audience: ${TESSERA_AUDIENCE:tessera}
+
+  bootstrap:
+    owner: ${TESSERA_BOOTSTRAP_OWNER:SU}
 
 jmouse:
   access:

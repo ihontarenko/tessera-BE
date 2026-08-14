@@ -1,6 +1,8 @@
 package net.innoventa.tessera.ai;
 
 import lombok.RequiredArgsConstructor;
+import net.innoventa.tessera.domain.BoardScopeStrategy;
+import net.innoventa.tessera.service.ProjectService;
 import net.innoventa.tessera.dto.board.BoardCardView;
 import net.innoventa.tessera.dto.board.BoardColumnView;
 import net.innoventa.tessera.dto.board.BoardResponse;
@@ -34,8 +36,9 @@ import java.util.Map;
 @RequiredArgsConstructor
 public class BoardTool implements ToolDefinition {
 
-    private final BoardService boardService;
-    private final ToolMembers  members;
+    private final BoardService   boardService;
+    private final ProjectService projectService;
+    private final ToolMembers    members;
 
     @Override
     public String toolName() {
@@ -44,7 +47,49 @@ public class BoardTool implements ToolDefinition {
 
     @Override
     public List<ToolAction> actions() {
-        return List.of(read());
+        return List.of(list(), read());
+    }
+
+    /**
+     * ⚠️ <strong>Every project has exactly one board, so this is thinner than its name suggests</strong>
+     * — and it is still worth having. {@code Board.projectId} is unique (ADR-0015), so there is no
+     * "which board" to choose and the useful question is a different one: <em>which of my projects plan
+     * in sprints</em>. A model that knows that before it starts does not offer to move something into a
+     * sprint that cannot exist.
+     *
+     * <p>Not scope-confined, for the reason {@code projects.list} is not: it is how a caller finds out
+     * what there is.
+     */
+    private ToolAction list() {
+        return ToolAction.builder()
+                .toolName(toolName())
+                .name("list")
+                .title("List boards")
+                .description("Lists the board of every project this person belongs to, and whether each "
+                           + "one is scoped to an active sprint or shows everything. Every project has "
+                           + "exactly one board, so this is really the answer to 'which of my projects "
+                           + "plan in sprints'.")
+                .inputSchema(ArgumentSchema.none())
+                .requiredPermission(Permissions.BROWSE_PROJECT)
+                .readOnly()
+                .handler(this::handleList)
+                .build();
+    }
+
+    private Object handleList(ToolInvocation invocation) {
+        return projectService.list(members.actingSubject(invocation)).stream()
+                .map(project -> {
+                    Map<String, Object> described = new LinkedHashMap<>();
+
+                    described.put("project", project.key());
+                    described.put("scope",
+                            project.boardScopeStrategy() == BoardScopeStrategy.ACTIVE_SPRINT
+                                    ? "the active sprint"
+                                    : "every open issue");
+
+                    return described;
+                })
+                .toList();
     }
 
     private ToolAction read() {

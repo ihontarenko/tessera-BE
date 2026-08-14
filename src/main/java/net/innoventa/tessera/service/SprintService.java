@@ -54,6 +54,18 @@ public class SprintService {
     @Transactional(readOnly = true)
     public List<SprintSummary> list(Jwt jwt, String projectId) {
         memberService.resolveMember(jwt);
+
+        return list(projectId);
+    }
+
+    /**
+     * The same, for a caller that is not an HTTP request — see {@code ProjectService.list(Member)}.
+     *
+     * <p>⚠️ No caller parameter: a project's sprints read the same to everybody who may see the project
+     * at all, and who that is has already been decided.
+     */
+    @Transactional(readOnly = true)
+    public List<SprintSummary> list(String projectId) {
         projectService.requireProject(projectId);
 
         return sprintRepository.findByProjectIdOrderByCreatedAtAsc(projectId).stream()

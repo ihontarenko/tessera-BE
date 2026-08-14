@@ -1,6 +1,8 @@
 package net.innoventa.tessera.ai;
 
 import lombok.RequiredArgsConstructor;
+import net.innoventa.tessera.domain.BoardScopeStrategy;
+import net.innoventa.tessera.dto.project.CreateProjectRequest;
 import net.innoventa.tessera.dto.project.ProjectResponse;
 import net.innoventa.tessera.security.Permissions;
 import net.innoventa.tessera.service.ProjectService;
@@ -39,7 +41,7 @@ public class ProjectTool implements ToolDefinition {
 
     @Override
     public List<ToolAction> actions() {
-        return List.of(list());
+        return List.of(list(), get(), create());
     }
 
     private ToolAction list() {
@@ -62,6 +64,98 @@ public class ProjectTool implements ToolDefinition {
         return projectService.list(members.actingSubject(invocation)).stream()
                 .map(this::describe)
                 .toList();
+    }
+
+    // ── One project ──────────────────────────────────────────────────────────────
+
+    private ToolAction get() {
+        return ToolAction.builder()
+                .toolName(toolName())
+                .name("get")
+                .title("Read one project")
+                .description("Reads one project — its name, its lead, and whether it plans in sprints. "
+                           + "Ask for this before planning work in a project, because whether a sprint "
+                           + "exists to put an issue into is a property of the project and not "
+                           + "something to assume.")
+                .inputSchema(ArgumentSchema.builder()
+                        .scope(ProjectScopeResolver.KIND, "projects_list"))
+                .requiredPermission(Permissions.BROWSE_PROJECT)
+                .readOnly()
+                .scopeConfined()
+                .handler(this::handleGet)
+                .build();
+    }
+
+    private Object handleGet(ToolInvocation invocation) {
+        ProjectResponse project =
+                projectService.get(members.actingSubject(invocation), invocation.scopeId());
+
+        Map<String, Object> described = describe(project);
+
+        // Only on the single read: a list of twenty projects does not need this twenty times, and the
+        // one question it answers — "is there a backlog and sprints here" — is asked about one project.
+        described.put("planning",
+                project.boardScopeStrategy() == BoardScopeStrategy.ACTIVE_SPRINT ? "sprints" : "board");
+
+        return described;
+    }
+
+    // ── Making one ───────────────────────────────────────────────────────────────
+
+    /**
+     * ⚠️ <strong>Not scope-confined, and it cannot be:</strong> there is no project yet to be confined
+     * to. It is the one action here that writes, and the only permission it can honestly declare is the
+     * one every read declares — because Tessera has never gated creating a project on anything but being
+     * signed in, and inventing a permission during a cutover would be a new rule wearing a refactor's
+     * clothes.
+     *
+     * <p>Confirmed, though. A project is the one thing in this product that cannot be deleted through
+     * any surface at all, so a mistaken one is permanent — which is a stronger argument for asking than
+     * most deletes have.
+     */
+    private ToolAction create() {
+        return ToolAction.builder()
+                .toolName(toolName())
+                .name("create")
+                .title("Create a project")
+                .description("Creates a project and makes the caller its administrator. The key is what "
+                           + "every issue in it will be prefixed with — TES-42 — and is permanent: it "
+                           + "must be uppercase letters and digits, starting with a letter. Choose it "
+                           + "with the person rather than for them.")
+                .inputSchema(ArgumentSchema.builder()
+                        .requiredString("name", "What the project is called, for people to read.")
+                        .requiredString("key",
+                                "The permanent issue-key prefix, uppercase letters and digits — TES, "
+                              + "PLATFORM. Cannot be changed afterwards.")
+                        .optionalBoolean("plansInSprints",
+                                "True for a Scrum project — a backlog, sprints and a sprint-scoped "
+                              + "board. False or omitted for a board of everything.")
+                        .confirm())
+                .requiredPermission(Permissions.BROWSE_PROJECT)
+                .handler(this::handleCreate)
+                .build();
+    }
+
+    private Object handleCreate(ToolInvocation invocation) {
+        BoardScopeStrategy planning = invocation.flag("plansInSprints")
+                ? BoardScopeStrategy.ACTIVE_SPRINT
+                : BoardScopeStrategy.ALL_ISSUES;
+
+        ProjectResponse created = projectService.create(
+                members.actingSubject(invocation),
+                new CreateProjectRequest(
+                        invocation.requiredString("name"),
+                        invocation.requiredString("key"),
+                        planning,
+                        // The lead is the creator unless somebody says otherwise, and saying otherwise
+                        // needs a member identifier a model has no way to know. It is a screen's job.
+                        null));
+
+        Map<String, Object> answer = new LinkedHashMap<>(describe(created));
+
+        answer.put("created", true);
+
+        return answer;
     }
 
     /**

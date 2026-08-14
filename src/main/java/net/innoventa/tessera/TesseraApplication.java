@@ -2,7 +2,7 @@ package net.innoventa.tessera;
 
 import org.springframework.boot.SpringApplication;
 import org.springframework.boot.autoconfigure.SpringBootApplication;
-import org.springframework.boot.autoconfigure.domain.EntityScan;
+import org.springframework.boot.persistence.autoconfigure.EntityScan;
 
 /**
  * ⚠️ <strong>The entity scan is widened by hand because two libraries own tables this service stores

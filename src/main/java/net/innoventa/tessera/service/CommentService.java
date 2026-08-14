@@ -50,7 +50,12 @@ public class CommentService {
 
     @Transactional
     public CommentResponse add(Jwt jwt, String issueId, SaveCommentRequest request) {
-        Member caller = memberService.resolveMember(jwt);
+        return add(memberService.resolveMember(jwt), issueId, request);
+    }
+
+    /** The same, for a caller that is not an HTTP request — see {@code ProjectService.list(Member)}. */
+    @Transactional
+    public CommentResponse add(Member caller, String issueId, SaveCommentRequest request) {
         Issue issue = requireIssue(issueId);
 
         Comment comment = commentRepository.save(Comment.builder()

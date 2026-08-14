@@ -51,7 +51,18 @@ public class ProjectIssueTypeService {
     public ProjectIssueTypesResponse listCreatableIssueTypes(Jwt jwt, String projectId) {
         memberService.resolveMember(jwt);
 
-        Project project = projectService.requireProject(projectId);
+        return listCreatableIssueTypes(projectService.requireProject(projectId));
+    }
+
+    /**
+     * The same, for a caller that already holds the project — a tool handler, or {@link #requireCreatable}'s
+     * neighbours.
+     *
+     * <p>⚠️ It is the <em>same list</em> the create dialog is built from, deliberately. A tool that
+     * resolved a type name against the installation's whole catalog would offer a model something this
+     * project's scheme then refuses, which is the disagreement this class exists to make impossible.
+     */
+    public ProjectIssueTypesResponse listCreatableIssueTypes(Project project) {
         List<IssueType> granted = grantedTypes(project);
 
         List<IssueTypeResponse> issueTypes = granted.stream()

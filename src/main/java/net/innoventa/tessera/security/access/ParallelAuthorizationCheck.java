@@ -111,11 +111,13 @@ public class ParallelAuthorizationCheck {
 
         List<Disagreement> disagreements = new ArrayList<>();
         int                compared      = 0;
+        int                orphaned      = 0;
 
         for (Pair pair : pairs()) {
             Member member = members.findById(pair.memberId()).orElse(null);
 
             if (member == null) {
+                orphaned++;
                 continue;
             }
 
@@ -132,7 +134,7 @@ public class ParallelAuthorizationCheck {
             }
         }
 
-        report(compared, disagreements, whoIsWho);
+        report(compared, orphaned, disagreements, whoIsWho);
     }
 
     private List<Pair> pairs() {
@@ -142,11 +144,25 @@ public class ParallelAuthorizationCheck {
                 .toList();
     }
 
-    private void report(int compared, List<Disagreement> disagreements, Map<String, String> whoIsWho) {
+    private void report(
+            int compared, int orphaned, List<Disagreement> disagreements, Map<String, String> whoIsWho) {
+
+        // ⚠️ Nothing compared is NOT the same fact as everything agreeing, and reporting it as one is
+        // the failure this whole check exists to prevent, committed by the check itself. An installation
+        // with no memberships — or one whose membership rows point at accounts that are gone — would
+        // otherwise read a reassuring line every start while proving absolutely nothing.
+        if (compared == 0) {
+            LOGGER.warn("Access parallel run: NOTHING WAS COMPARED. {} membership row(s) exist and {} of "
+                        + "them name an account that no longer has a member row. Until there is data to "
+                        + "compare, this check has not confirmed anything about the cutover.",
+                    compared + orphaned, orphaned);
+            return;
+        }
+
         if (disagreements.isEmpty()) {
             LOGGER.info("Access parallel run: {} (member, project) pair(s) compared, both models agree "
-                        + "on every one. The engine reproduces what ProjectPermissionService answered.",
-                    compared);
+                        + "on every one. The engine reproduces what ProjectPermissionService answered.{}",
+                    compared, orphaned == 0 ? "" : orphanNote(orphaned));
             return;
         }
 
@@ -164,6 +180,16 @@ public class ParallelAuthorizationCheck {
                     gained.isEmpty() ? "nothing" : gained,
                     lost.isEmpty() ? "nothing" : lost);
         }
+    }
+
+    /**
+     * ⚠️ A membership naming an account that no longer exists is worth a sentence even when everything
+     * else agrees. Nothing cascades: the row survived its member, so it is both a comparison that could
+     * not happen and a row somebody has to clear.
+     */
+    private static String orphanNote(int orphaned) {
+        return " " + orphaned + " membership row(s) were skipped because the member they name no longer "
+             + "exists — those pairs were not compared.";
     }
 
     private static Set<String> difference(Set<String> from, Set<String> without) {

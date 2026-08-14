@@ -9,7 +9,7 @@
     <parent>
         <groupId>org.springframework.boot</groupId>
         <artifactId>spring-boot-starter-parent</artifactId>
-        <version>3.3.2</version>
+        <version>4.0.7</version>
         <relativePath/>
     </parent>
 
@@ -74,6 +74,17 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+        <!-- ⚠️ Boot 4 splits autoconfiguration into per-technology modules, and Flyway is the one
+             dependency here taken without a Boot starter — so THIS module is what actually runs the
+             migrations. Without it `flyway-core` sits on the classpath doing nothing: no log line, no
+             error, migrations silently never applied. An already-migrated database starts perfectly
+             well and only surfaces the gap whenever the next migration is added.
+
+             That silence is why it is named before flyway-core rather than after it. -->
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-flyway</artifactId>
         </dependency>
         <dependency>
             <groupId>org.flywaydb</groupId>
@@ -216,6 +227,22 @@
         <dependency>
             <groupId>org.jmouse</groupId>
             <artifactId>jmouse-ai-jpa</artifactId>
+            <version>${jmouse.version}</version>
+        </dependency>
+        <!-- The catalogue, published over the Model Context Protocol. ⚠️ It decides nothing: every
+             handler it exposes goes through the same ToolDispatcher the in-app assistant calls, so
+             there is no second path into an action and no second place a permission is checked.
+
+             It brings the MCP Java SDK, whose `HttpServletStreamableServerTransportProvider` is a plain
+             HttpServlet — so no Spring MCP module is needed here: the servlet is registered by hand and
+             Spring Security's filter chain authenticates in front of it.
+
+             ⚠️ It is also what forced the move to Boot 4. The SDK's only JSON binding is Jackson 3, and
+             Jackson 3 kept its annotations in Jackson 2's package — so on Boot 3.3.2 the server refused
+             to build with NoSuchFieldError on JsonFormat$Shape.POJO. See McpConfiguration. -->
+        <dependency>
+            <groupId>org.jmouse</groupId>
+            <artifactId>jmouse-ai-mcp</artifactId>
             <version>${jmouse.version}</version>
         </dependency>
 

@@ -67,7 +67,12 @@ public class ProjectService {
 
     @Transactional
     public ProjectResponse create(Jwt jwt, CreateProjectRequest request) {
-        Member creator = memberService.resolveMember(jwt);
+        return create(memberService.resolveMember(jwt), request);
+    }
+
+    /** The same, for a caller that is not an HTTP request — see {@link #list(Member)}. */
+    @Transactional
+    public ProjectResponse create(Member creator, CreateProjectRequest request) {
 
         if (projectRepository.existsByKey(request.key())) {
             throw new BusinessRuleViolationException("Project key already in use: " + request.key());
@@ -146,7 +151,12 @@ public class ProjectService {
 
     @Transactional(readOnly = true)
     public ProjectResponse get(Jwt jwt, String projectId) {
-        Member member = memberService.resolveMember(jwt);
+        return get(memberService.resolveMember(jwt), projectId);
+    }
+
+    /** The same, for a caller that is not an HTTP request — see {@link #list(Member)}. */
+    @Transactional(readOnly = true)
+    public ProjectResponse get(Member member, String projectId) {
 
         // ⚠️ ADR-0002's isolation is the permission axis's now: a caller who holds nothing at this project
         // is refused with NOT_FOUND_OR_HIDDEN before this method runs, which is the same 404 the check
