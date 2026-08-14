@@ -17,4 +17,11 @@ public interface BoardColumnStatusRepository extends JpaRepository<BoardColumnSt
     /** A column's own explicit mappings — cleared when the column is deleted. */
     List<BoardColumnStatus> findByBoardColumnId(String boardColumnId);
 
+    /**
+     * Every board that maps this status explicitly. What refuses its deletion, and — because an explicit
+     * mapping outranks the category fallback (ADR-0010) — the set of boards a category change does
+     * <em>not</em> move anything on.
+     */
+    List<BoardColumnStatus> findByStatusId(String statusId);
+
 }

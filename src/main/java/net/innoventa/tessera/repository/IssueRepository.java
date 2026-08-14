@@ -50,4 +50,76 @@ public interface IssueRepository extends JpaRepository<Issue, String> {
     /** The current maximum rank in a project, so a newly-created issue can be appended after it. */
     Optional<Issue> findFirstByProjectIdOrderByRankDesc(String projectId);
 
+    // ── What holds a configuration row ────────────────────────────────────────
+    //
+    // Every count below answers one half of "you cannot delete this, here is what has it". They are
+    // grouped queries rather than a count per row on purpose: the Administration screen shows a number
+    // beside every status and every issue type at once, and a query per row is how a catalog of thirty
+    // becomes sixty round trips.
+
+    @Query("select new net.innoventa.tessera.repository.CountByKey(issue.statusId, count(issue)) "
+           + "from Issue issue group by issue.statusId")
+    List<CountByKey> countIssuesByStatus();
+
+    @Query("select new net.innoventa.tessera.repository.CountByKey(issue.issueTypeId, count(issue)) "
+           + "from Issue issue group by issue.issueTypeId")
+    List<CountByKey> countIssuesByIssueType();
+
+    @Query("select new net.innoventa.tessera.repository.CountByKey(issue.priorityId, count(issue)) "
+           + "from Issue issue group by issue.priorityId")
+    List<CountByKey> countIssuesByPriority();
+
+    /** ⚠️ The null bucket is every open issue — {@code resolution IS NULL} is the invariant (ADR-0004). */
+    @Query("select new net.innoventa.tessera.repository.CountByKey(issue.resolutionId, count(issue)) "
+           + "from Issue issue group by issue.resolutionId")
+    List<CountByKey> countIssuesByResolution();
+
+    long countByStatusId(String statusId);
+
+    /**
+     * Issues in a status that are still open — {@code resolution IS NULL} is what open means (ADR-0004).
+     * The sharp half of "you are about to make this status a Done one": these would sit in the Done
+     * column and still be open, which reads to everybody as a bug in the board.
+     */
+    long countByStatusIdAndResolutionIdIsNull(String statusId);
+
+    long countByIssueTypeId(String issueTypeId);
+
+    long countByPriorityId(String priorityId);
+
+    long countByResolutionId(String resolutionId);
+
+    @Query("select count(distinct issue.projectId) from Issue issue where issue.statusId = :statusId")
+    long countProjectsHoldingStatus(@Param("statusId") String statusId);
+
+    @Query("select count(distinct issue.projectId) from Issue issue where issue.issueTypeId = :issueTypeId")
+    long countProjectsHoldingIssueType(@Param("issueTypeId") String issueTypeId);
+
+    @Query("select count(distinct issue.projectId) from Issue issue where issue.priorityId = :priorityId")
+    long countProjectsHoldingPriority(@Param("priorityId") String priorityId);
+
+    @Query("select count(distinct issue.projectId) from Issue issue where issue.resolutionId = :resolutionId")
+    long countProjectsHoldingResolution(@Param("resolutionId") String resolutionId);
+
+    /**
+     * How many issues in this status each project holds — the input to "how many cards change column".
+     * A board belongs to a project, so the answer has to be per project rather than one total.
+     */
+    @Query("select new net.innoventa.tessera.repository.CountByKey(issue.projectId, count(issue)) "
+           + "from Issue issue where issue.statusId = :statusId group by issue.projectId")
+    List<CountByKey> countIssuesInStatusByProject(@Param("statusId") String statusId);
+
+    /**
+     * Every parent/child issue-type pairing that exists, counted — the input to "changing this level
+     * would invalidate N hierarchies".
+     *
+     * <p>An entity join rather than a mapped association: ids are stored flat throughout this schema
+     * (no JPA relations), so the parent is joined on its identifier like any other row.
+     */
+    @Query("select new net.innoventa.tessera.repository.IssueTypePairCount("
+           + "  parent.issueTypeId, child.issueTypeId, count(child)) "
+           + "from Issue child join Issue parent on parent.id = child.parentId "
+           + "group by parent.issueTypeId, child.issueTypeId")
+    List<IssueTypePairCount> countParentChildTypePairs();
+
 }

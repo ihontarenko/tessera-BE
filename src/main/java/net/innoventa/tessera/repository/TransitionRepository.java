@@ -20,4 +20,16 @@ public interface TransitionRepository extends JpaRepository<Transition, String> 
     /** Every legal target from a given status in a workflow — the "available transitions" list. */
     List<Transition> findByWorkflowIdAndFromStatusId(String workflowId, String fromStatusId);
 
+    /**
+     * Every edge naming this status at either end — what refuses its deletion, and what a workflow
+     * would lose with it. A status belongs to a workflow only through its transitions (there is no
+     * {@code workflow_statuses} table), so this is also how "which workflows use it" is answered.
+     */
+    List<Transition> findByFromStatusIdOrToStatusId(String fromStatusId, String toStatusId);
+
+    long countByWorkflowId(String workflowId);
+
+    /** Deleting a workflow takes its edges with it — nothing else references a transition. */
+    void deleteByWorkflowId(String workflowId);
+
 }

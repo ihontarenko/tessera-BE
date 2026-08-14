@@ -19,9 +19,23 @@ public class GlobalExceptionHandler {
         return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, exception.getMessage());
     }
 
+    /**
+     * ⚠️ The evidence travels beside the prose where the rule has any.
+     *
+     * <p>"Cannot delete In Review — 12 issues in 3 projects, 4 board columns" is a fact with parts, and a
+     * client that wants to link to those projects should not have to parse the sentence to find them.
+     * The {@code details} property is the same refusal in structure; a client may render either, and
+     * they cannot disagree because the message is built from the object.
+     */
     @ExceptionHandler(BusinessRuleViolationException.class)
     ProblemDetail handleBusinessRuleViolation(BusinessRuleViolationException exception) {
-        return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, exception.getMessage());
+        ProblemDetail problem = ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, exception.getMessage());
+
+        if (exception.getDetails() != null) {
+            problem.setProperty("details", exception.getDetails());
+        }
+
+        return problem;
     }
 
     @ExceptionHandler(ForbiddenException.class)

@@ -15,4 +15,10 @@ public interface WorkflowSchemeItemRepository extends JpaRepository<WorkflowSche
     /** The per-type workflow override for a scheme, if any; absent means fall back to the default. */
     Optional<WorkflowSchemeItem> findBySchemeIdAndIssueTypeId(String schemeId, String issueTypeId);
 
+    /** Every per-type override pointing at this workflow — half of what refuses the workflow's deletion. */
+    List<WorkflowSchemeItem> findByWorkflowId(String workflowId);
+
+    /** Every per-type override naming this issue type — part of what refuses the type's deletion. */
+    List<WorkflowSchemeItem> findByIssueTypeId(String issueTypeId);
+
 }

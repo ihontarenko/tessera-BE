@@ -11,4 +11,7 @@ public interface IssueTypeSchemeItemRepository extends JpaRepository<IssueTypeSc
 
     List<IssueTypeSchemeItem> findBySchemeIdInOrderBySequenceAsc(List<String> schemeIds);
 
+    /** Every scheme granting this issue type — what refuses its deletion, and the "granted by" panel. */
+    List<IssueTypeSchemeItem> findByIssueTypeId(String issueTypeId);
+
 }

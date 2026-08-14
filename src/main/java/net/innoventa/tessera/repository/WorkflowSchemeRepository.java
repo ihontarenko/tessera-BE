@@ -9,4 +9,7 @@ public interface WorkflowSchemeRepository extends JpaRepository<WorkflowScheme, 
 
     List<WorkflowScheme> findAllByOrderByNameAsc();
 
+    /** Every scheme whose fallback is this workflow — half of what refuses the workflow's deletion. */
+    List<WorkflowScheme> findByDefaultWorkflowId(String workflowId);
+
 }

@@ -9,4 +9,7 @@ public interface IssueTypeSchemeRepository extends JpaRepository<IssueTypeScheme
 
     List<IssueTypeScheme> findAllByOrderByNameAsc();
 
+    /** Every scheme that preselects this issue type — part of what refuses the type's deletion. */
+    List<IssueTypeScheme> findByDefaultIssueTypeId(String issueTypeId);
+
 }

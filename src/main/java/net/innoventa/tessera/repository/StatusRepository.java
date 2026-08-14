@@ -9,4 +9,9 @@ public interface StatusRepository extends JpaRepository<Status, String> {
 
     List<Status> findAllByOrderByNameAsc();
 
+    /** Case-insensitively — see {@link PriorityRepository#existsByNameIgnoreCase} for why. */
+    boolean existsByNameIgnoreCase(String name);
+
+    boolean existsByNameIgnoreCaseAndIdNot(String name, String id);
+
 }

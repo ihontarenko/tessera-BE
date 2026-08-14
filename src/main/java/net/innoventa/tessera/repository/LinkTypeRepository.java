@@ -9,4 +9,9 @@ public interface LinkTypeRepository extends JpaRepository<LinkType, String> {
 
     List<LinkType> findAllByOrderByNameAsc();
 
+    /** Case-insensitively — see {@link PriorityRepository#existsByNameIgnoreCase} for why. */
+    boolean existsByNameIgnoreCase(String name);
+
+    boolean existsByNameIgnoreCaseAndIdNot(String name, String id);
+
 }
