@@ -1,0 +1,174 @@
+# =============================================================================
+#  Tessera's authorization, written down.
+#
+#  ⚠️ WHAT THIS FILE IS. It is the VOCABULARY — the floors, the permissions, and
+#  what each role carries — and it is the SEED: at the first start `PolicySeedStep`
+#  writes the roles, their bundles and the bootstrap assignment into `access_*`
+#  rows, once, behind a per-step ledger. From then on THE ENGINE READS ROWS AND
+#  NOTHING ELSE. `AccessStorageConfiguration` refuses the composition that would
+#  otherwise union this document back over the tables, because a permission taken
+#  off a role through the management screen must not go on being granted by the
+#  file it was seeded from.
+#
+#  So: a line removed from this file is a row removed from the table, on the next
+#  start whose checksum has moved. It is not a second opinion the engine consults.
+#
+#  ⚠️ WHAT IT REPLACED. Four tables — `permissions`, `project_roles`,
+#  `project_role_permissions`, `project_permission_overrides` — and a resolver
+#  that joined them by surrogate key. A permission is stored by NAME now, so the
+#  first of those was a third copy of a list the code already states, and
+#  `DeclaredPolicyValidator` checks this file against `Permissions` in both
+#  directions: a name here no constant matches fails the boot, and so does a
+#  constant no line here declares.
+#
+#  ⚠️ ONE SEMANTIC CHANGE, IN THE SAFE DIRECTION. Overrides used to be applied in
+#  insertion order, so an ALLOW written after a DENY quietly won. The engine's rule
+#  is DENY WINS, THE SUBTRACTION LAST, AT EVERY LEVEL — so the same two rows now
+#  refuse. Any pair where that changes the answer was a pair nobody could have
+#  predicted the answer to.
+# =============================================================================
+
+policy "tessera" {
+
+    # ── The vocabulary ────────────────────────────────────────────────────────
+    #
+    # ⚠️ RENAMED FROM `BROWSE_PROJECT`, `CREATE_ISSUE` AND SO ON, and the grammar is
+    # why rather than taste. A permission here must be `namespace:action` — the colon
+    # is what the parser identifies the shape BY, since nothing else tells a
+    # permission from one of the language's own keywords — so a single-word name
+    # cannot be written down at all. `CursorMatcher` says outright that refusing MORE
+    # than two segments would be "a language dictating a product's vocabulary"; the
+    # floor of two is the same thing said quietly, and it is a library finding rather
+    # than a Tessera preference. `V000013` maps the old names across.
+    declare permissions {
+        project:browse      "View the project and its issues"
+        issue:create        "Create issues in the project"
+        issue:edit          "Edit issue fields"
+        issue:assign        "Assign issues to members"
+        issue:transition    "Move issues through the workflow"
+        issue:delete        "Delete issues"
+        comment:write       "Comment on issues, and edit or delete your own"
+        sprint:manage       "Create and manage sprints"
+        project:administer  "Administer the project — settings, membership, roles, overrides"
+
+        # ⚠️ The tenth, and the only one this move adds. A ROLE IS INSTALLATION-WIDE:
+        # editing what Developer carries changes it in every project at once, which
+        # is not a power `project:administer` can honestly contain — a person
+        # administering one project would be editing everybody else's. It also gates
+        # reading who holds what across the installation, which is a disclosure
+        # surface rather than a convenience.
+        access:administer   "Edit the roles every project shares, and see who holds what"
+
+        # ⚠️ The eleventh, and installation-wide for the same reason the tenth is.
+        # THE CONFIGURATION IS SHARED BY DESIGN — a workflow, a status and a scheme
+        # belong to every project that uses them — so adding a transition changes
+        # what everybody may do. `project:administer` cannot honestly contain that:
+        # somebody administering one project would be editing everybody else's.
+        #
+        # It gates WRITES ONLY. `GET /api/configuration*` stays open to any
+        # signed-in caller, because every picker in the product is built from it.
+        configuration:administer "Edit the catalogs every project runs on — statuses, workflows, issue types, schemes"
+    }
+
+    # ── The three project roles ───────────────────────────────────────────────
+    #
+    # Each is the previous one plus something, and the growth is deliberate: a
+    # person moved up a step should never lose anything, or "promote" becomes a
+    # change nobody can predict.
+    #
+    # ⚠️ `assignable @PROJECT` is what stops any of them being handed out
+    # installation-wide. It comes from the grammar and from nowhere else — deriving
+    # it from the widest scope in the bundle would be right by accident for these
+    # three and undefined for a role that bundles nothing.
+
+    # Read-only, and may comment. Everything a person needs to follow work they are
+    # not doing.
+    declare role PROJECT_VIEWER assignable @PROJECT {
+        @PROJECT  project:browse
+        @PROJECT  comment:write
+    }
+
+    # Works on issues. Everything except deleting one and administering the project
+    # — the two acts that are hard to undo and the two that are about the container
+    # rather than about the work.
+    declare role PROJECT_DEVELOPER assignable @PROJECT {
+        @PROJECT  project:browse
+        @PROJECT  comment:write
+        @PROJECT  issue:create
+        @PROJECT  issue:edit
+        @PROJECT  issue:assign
+        @PROJECT  issue:transition
+        @PROJECT  sprint:manage
+    }
+
+    # Full control of the project, its settings and its membership.
+    declare role PROJECT_ADMINISTRATOR assignable @PROJECT {
+        @PROJECT  project:browse
+        @PROJECT  comment:write
+        @PROJECT  issue:create
+        @PROJECT  issue:edit
+        @PROJECT  issue:assign
+        @PROJECT  issue:transition
+        @PROJECT  issue:delete
+        @PROJECT  sprint:manage
+        @PROJECT  project:administer
+    }
+
+    # ── The way back in ───────────────────────────────────────────────────────
+    #
+    # An authorization system has a chicken-and-egg at its root: somebody needs
+    # rights before anybody can be granted rights.
+    #
+    # ⚠️ DELIBERATELY NOT A SUPERUSER. It opens no project, reads no issue and
+    # transitions nothing. Everything the tracker actually *does* still comes from a
+    # project role somebody can edit and take away.
+    #
+    # ⚠️ IT CARRIES `configuration:administer` TOO, and that is a widening worth
+    # naming. It used to carry exactly one permission and its whole story was "enough
+    # to hand the powers back out". Editing the shared catalogs is not that — it is a
+    # second installation-wide job that happens to have the same holder, because the
+    # only global assignment this product ever makes is `MemberProvisioner` handing
+    # this role to the first member. A role of its own would be more honest and would
+    # reach nobody: nothing assigns a global role from a screen, so a second one would
+    # sit in the catalog held by no one, which is the exact failure this cluster's
+    # spec warns about.
+    #
+    # It stays separable where it matters: the two permissions are two switches on the
+    # access screen, so an installation that wants the configuration in different hands
+    # takes this one off here and grants it personally.
+    #
+    # There is deliberately no `@GLOBAL *`. A wildcard is convenient exactly where
+    # convenience is worst.
+    declare role GLOBAL_ACCESS_ADMINISTRATOR assignable @GLOBAL {
+        @GLOBAL  access:administer
+        @GLOBAL  configuration:administer
+    }
+
+    # ⚠️ THE ROLE IS DECLARED HERE AND ASSIGNED IN CODE, unlike Innoventa's, and the
+    # difference is about where accounts come from. Innoventa writes
+    # `assign subject ${innoventa.bootstrap.owner}` because it seeds a superuser row
+    # in a migration and therefore knows an identifier before anybody signs in.
+    # Tessera's members are PROVISIONED ON FIRST SIGN-IN from Identity's token, so at
+    # the moment this file is read there is no identifier to name — and a placeholder
+    # naming nobody would be a grant that quietly confers nothing.
+    #
+    # So `MemberProvisioner` gives it to the FIRST member ever provisioned. That is a
+    # row, in the one home, carrying who and when; it is auditable and — unlike a
+    # grant a file keeps re-asserting — it can be handed on and taken away.
+
+    # ── The floors ────────────────────────────────────────────────────────────
+    #
+    # ⚠️ DECLARATION ORDER IS WIDTH ORDER. The rank of each floor in the covering
+    # chain is its position in this block and there is deliberately no rank column
+    # anywhere. `parameter=projectId` is what lets a route spell its place into the
+    # URL and be bound without naming a resource — which is why almost nothing in
+    # this product needs an `AccessTargetResolver`.
+    #
+    # Why there is no @BOARD and no @ORGANIZATION is written into `TesseraScope`'s
+    # own javadoc, beside the enum this block has to agree with.
+    declare scopes {
+        @GLOBAL   everything
+        @PROJECT  place  parameter=projectId
+        @SELF     'own-rows'
+    }
+}

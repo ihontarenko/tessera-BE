@@ -38,7 +38,6 @@ public class IssueOrganizationService {
     private final IssueLabelRepository issueLabelRepository;
     private final LabelRepository labelRepository;
     private final ProjectService projectService;
-    private final ProjectPermissionService projectPermissionService;
     private final MemberService memberService;
     private final ActivityLogService activityLogService;
     private final IssueAssembler issueAssembler;
@@ -49,7 +48,6 @@ public class IssueOrganizationService {
         Member caller = memberService.resolveMember(jwt);
         Issue issue = requireIssue(issueId);
         Project project = projectService.requireProject(issue.getProjectId());
-        projectPermissionService.require(caller, issue.getProjectId(), Permissions.EDIT_ISSUE);
 
         ActivityLogService.ChangeSet changes = activityLogService.changeSet()
             .compare(FIELD_LABELS, currentLabels(issueId), joinedLabels(request.resolveLabels()));

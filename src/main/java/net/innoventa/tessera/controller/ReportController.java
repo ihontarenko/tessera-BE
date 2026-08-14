@@ -3,7 +3,10 @@ package net.innoventa.tessera.controller;
 import lombok.RequiredArgsConstructor;
 import net.innoventa.tessera.dto.report.SprintReportResponse;
 import net.innoventa.tessera.dto.report.VelocityPointView;
+import net.innoventa.tessera.security.Permissions;
+import net.innoventa.tessera.security.access.Scopes;
 import net.innoventa.tessera.service.report.SprintReportService;
+import org.jmouse.access.enforcement.RequiresAccess;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -28,6 +31,7 @@ import java.util.List;
  */
 @RestController
 @RequiredArgsConstructor
+@RequiresAccess(permission = Permissions.BROWSE_PROJECT, scope = Scopes.PROJECT)
 public class ReportController {
 
     private final SprintReportService sprintReportService;

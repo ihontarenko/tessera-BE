@@ -45,13 +45,11 @@ public class ProjectIssueTypeService {
     private final IssueTypeSchemeItemRepository issueTypeSchemeItemRepository;
     private final IssueTypeRepository issueTypeRepository;
     private final ProjectService projectService;
-    private final ProjectPermissionService projectPermissionService;
     private final MemberService memberService;
 
     /** The types {@code projectId} may create, scheme-ordered, plus the default to preselect. */
     public ProjectIssueTypesResponse listCreatableIssueTypes(Jwt jwt, String projectId) {
-        Member caller = memberService.resolveMember(jwt);
-        projectPermissionService.requireVisible(caller.getId(), projectId);
+        memberService.resolveMember(jwt);
 
         Project project = projectService.requireProject(projectId);
         List<IssueType> granted = grantedTypes(project);

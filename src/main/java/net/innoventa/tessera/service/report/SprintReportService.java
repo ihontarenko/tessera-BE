@@ -18,7 +18,6 @@ import net.innoventa.tessera.repository.IssueTypeRepository;
 import net.innoventa.tessera.repository.MemberRepository;
 import net.innoventa.tessera.repository.StatusRepository;
 import net.innoventa.tessera.service.MemberService;
-import net.innoventa.tessera.service.ProjectPermissionService;
 import net.innoventa.tessera.service.ProjectService;
 import net.innoventa.tessera.service.SprintService;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -57,7 +56,6 @@ public class SprintReportService {
     private final MemberRepository memberRepository;
 
     private final ProjectService projectService;
-    private final ProjectPermissionService projectPermissionService;
     private final MemberService memberService;
     private final SprintService sprintService;
     private final SprintFactLoader sprintFactLoader;
@@ -126,10 +124,13 @@ public class SprintReportService {
         );
     }
 
+    /**
+     * The acting member. {@code ReportController} declares {@code BROWSE_PROJECT} at the project for both
+     * reports, so the visibility gate this used to run is now the route's.
+     */
     private Member requireVisibleProject(Jwt jwt, String projectId) {
         Member caller = memberService.resolveMember(jwt);
         projectService.requireProject(projectId);
-        projectPermissionService.requireVisible(caller.getId(), projectId);
 
         return caller;
     }

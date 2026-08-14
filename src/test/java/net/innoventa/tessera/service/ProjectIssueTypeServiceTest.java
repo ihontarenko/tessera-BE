@@ -189,14 +189,10 @@ class ProjectIssueTypeServiceTest {
             .isEqualTo(BUG.getId());
     }
 
-    @Test
-    @DisplayName("a non-member cannot read a project's types — visibility is checked before the scheme")
-    void refusesToListForANonMember() {
-        doThrow(new ResourceNotFoundException("Project not found: " + PROJECT_ID))
-            .when(projectPermissionService).requireVisible(JWT_SUBJECT, PROJECT_ID);
-
-        assertThatThrownBy(() -> projectIssueTypeService.listCreatableIssueTypes(jwt, PROJECT_ID))
-            .isInstanceOf(ResourceNotFoundException.class);
-    }
+    // ⚠️ "a non-member cannot read a project's types" was asserted here and is gone, because what it
+    // asserted is gone: the service no longer runs a visibility gate. `@RequiresAccess(BROWSE_PROJECT,
+    // scope = PROJECT)` on GET /api/projects/{projectId}/issue-types is what refuses a non-member now,
+    // and the engine answers it with NOT_FOUND_OR_HIDDEN — the same 404, decided one layer out. A mock
+    // of a collaborator that no longer collaborates would have gone on passing while testing nothing.
 
 }

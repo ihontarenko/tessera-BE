@@ -35,13 +35,11 @@ public class IssueActivityService {
     private final ActivityLogItemRepository activityLogItemRepository;
     private final IssueRepository issueRepository;
     private final MemberRepository memberRepository;
-    private final ProjectPermissionService projectPermissionService;
     private final MemberService memberService;
 
     public List<ActivityLogResponse> list(Jwt jwt, String issueId) {
-        Member caller = memberService.resolveMember(jwt);
-        Issue issue = requireIssue(issueId);
-        projectPermissionService.requireVisible(caller.getId(), issue.getProjectId());
+        memberService.resolveMember(jwt);
+        requireIssue(issueId);
 
         List<ActivityLog> events = activityLogRepository.findByIssueIdOrderByCreatedAtDesc(issueId);
         if (events.isEmpty()) {

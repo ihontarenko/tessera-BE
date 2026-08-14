@@ -3,6 +3,7 @@ package net.innoventa.tessera.service;
 import lombok.RequiredArgsConstructor;
 import net.innoventa.tessera.domain.Member;
 import net.innoventa.tessera.domain.Permission;
+import net.innoventa.tessera.domain.PermissionEffect;
 import net.innoventa.tessera.domain.ProjectMembership;
 import net.innoventa.tessera.domain.ProjectPermissionOverride;
 import net.innoventa.tessera.domain.ProjectRole;
@@ -20,7 +21,8 @@ import net.innoventa.tessera.repository.PermissionRepository;
 import net.innoventa.tessera.repository.ProjectMembershipRepository;
 import net.innoventa.tessera.repository.ProjectPermissionOverrideRepository;
 import net.innoventa.tessera.repository.ProjectRoleRepository;
-import net.innoventa.tessera.security.Permissions;
+import net.innoventa.tessera.security.access.LocalAuthorizationMirror;
+import net.innoventa.tessera.security.access.ProjectAccess;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -51,25 +53,23 @@ public class ProjectMembershipService {
     private final MemberRepository memberRepository;
     private final MemberService memberService;
     private final ProjectService projectService;
-    private final ProjectPermissionService projectPermissionService;
+    private final ProjectAccess projectAccess;
+    private final LocalAuthorizationMirror grants;
     private final Supplier<String> idGenerator;
 
     @Transactional(readOnly = true)
     public List<ProjectMemberResponse> listMembers(Jwt jwt, String projectId) {
-        Member caller = memberService.resolveMember(jwt);
+        memberService.resolveMember(jwt);
         projectService.requireProject(projectId);
 
-        // Visibility is membership-based — a non-member does not see the project's people (ADR-0002).
-        if (!projectPermissionService.isMember(caller.getId(), projectId)) {
-            throw new ResourceNotFoundException("Project not found: " + projectId);
-        }
-
+        // ADR-0002's isolation is the route's: BROWSE_PROJECT at the project, refused as a 404 for
+        // anybody holding nothing there.
         return buildMemberResponses(projectId);
     }
 
     @Transactional
     public List<ProjectMemberResponse> addMember(Jwt jwt, String projectId, AddProjectMemberRequest request) {
-        requireAdministration(jwt, projectId);
+        Member caller = requireAdministration(jwt, projectId);
 
         Member target = memberService.requireMember(request.memberId());
         request.roleIds().stream().distinct().forEach(roleId -> {
@@ -82,6 +82,8 @@ public class ProjectMembershipService {
                     .roleId(roleId)
                     .build());
             }
+
+            grants.assignRole(target.getId(), projectId, displayNameOf(roleId), caller.getId());
         });
 
         return buildMemberResponses(projectId);
@@ -89,7 +91,7 @@ public class ProjectMembershipService {
 
     @Transactional
     public ProjectMemberResponse setRoles(Jwt jwt, String projectId, String memberId, SetMemberRolesRequest request) {
-        requireAdministration(jwt, projectId);
+        Member caller = requireAdministration(jwt, projectId);
         Member target = memberService.requireMember(memberId);
 
         List<String> roleIds = request.roleIds().stream().distinct().toList();
@@ -112,6 +114,13 @@ public class ProjectMembershipService {
             .roleId(roleId)
             .build()));
 
+        // Replace-the-set on the engine's side too, and in the same order: everything back, then what
+        // the request asked for. A role kept across the change is taken and re-given, which is one row
+        // rewritten rather than two states to reason about.
+        grants.unassignAllRoles(target.getId(), projectId);
+        roleIds.forEach(roleId ->
+            grants.assignRole(target.getId(), projectId, displayNameOf(roleId), caller.getId()));
+
         return buildMemberResponse(target.getId(), projectId);
     }
 
@@ -127,15 +136,21 @@ public class ProjectMembershipService {
 
         membershipRepository.deleteByProjectIdAndMemberId(projectId, target.getId());
         overrideRepository.deleteByProjectIdAndMemberId(projectId, target.getId());
+
+        // ⚠️ Nothing cascades. A library table cannot foreign-key into this product's rows, so deleting
+        // a membership leaves every grant it stood for behind unless something takes them back by hand.
+        grants.clearEverythingFor(target.getId(), projectId);
     }
 
     @Transactional
     public ProjectMemberResponse setOverride(Jwt jwt, String projectId, String memberId, SetPermissionOverrideRequest request) {
-        requireAdministration(jwt, projectId);
+        Member caller = requireAdministration(jwt, projectId);
         Member target = memberService.requireMember(memberId);
         requirePermission(request.permissionId());
 
-        if (!projectPermissionService.isMember(target.getId(), projectId)) {
+        // A business rule rather than an authorization check: an override on somebody who is not here
+        // would sit in the table granting or denying nothing, and nobody would find it.
+        if (!projectAccess.isMember(target, projectId)) {
             throw new BusinessRuleViolationException("Member is not part of this project: " + memberId);
         }
 
@@ -150,6 +165,9 @@ public class ProjectMembershipService {
             .effect(request.effect())
             .build());
 
+        grants.setOverride(target.getId(), projectId, permissionNameOf(request.permissionId()),
+            request.effect() == PermissionEffect.ALLOW, caller.getId());
+
         return buildMemberResponse(target.getId(), projectId);
     }
 
@@ -160,13 +178,25 @@ public class ProjectMembershipService {
 
         overrideRepository.deleteByProjectIdAndMemberIdAndPermissionId(projectId, target.getId(), permissionId);
 
+        grants.clearOverride(target.getId(), projectId, permissionNameOf(permissionId));
+
         return buildMemberResponse(target.getId(), projectId);
     }
 
-    private void requireAdministration(Jwt jwt, String projectId) {
+    /**
+     * The caller, having proved they may administer this project.
+     *
+     * <p>⚠️ <strong>The permission check itself is on the route now</strong> — every method here is
+     * reached through a handler carrying {@code @RequiresAccess(ADMINISTER_PROJECT, scope = PROJECT)},
+     * and the engine has already refused before any of this runs. What survives is resolving the caller,
+     * because an administration change records <em>who</em> made it, and asserting the project exists,
+     * because a 404 is a better answer than a grant at a place nothing has.
+     */
+    private Member requireAdministration(Jwt jwt, String projectId) {
         Member caller = memberService.resolveMember(jwt);
         projectService.requireProject(projectId);
-        projectPermissionService.require(caller, projectId, Permissions.ADMINISTER_PROJECT);
+
+        return caller;
     }
 
     private List<ProjectMemberResponse> buildMemberResponses(String projectId) {
@@ -258,6 +288,20 @@ public class ProjectMembershipService {
         if (!permissionRepository.existsById(permissionId)) {
             throw new ResourceNotFoundException("Permission not found: " + permissionId);
         }
+    }
+
+    /**
+     * What {@code project_roles} calls a role, for the mirror that has to name it the engine's way.
+     *
+     * <p>⚠️ Transitional, like the mirror itself: the screens still speak the surrogate identifiers those
+     * tables hand out, and V000014 replaces both with the name.
+     */
+    private String displayNameOf(String roleId) {
+        return projectRoleRepository.findById(roleId).map(ProjectRole::getName).orElse(null);
+    }
+
+    private String permissionNameOf(String permissionId) {
+        return permissionRepository.findById(permissionId).map(Permission::getName).orElse(null);
     }
 
 }

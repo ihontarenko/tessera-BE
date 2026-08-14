@@ -32,7 +32,6 @@ public class IssueHierarchyService {
     private final IssueRepository issueRepository;
     private final IssueTypeRepository issueTypeRepository;
     private final ProjectService projectService;
-    private final ProjectPermissionService projectPermissionService;
     private final MemberService memberService;
     private final ActivityLogService activityLogService;
     private final IssueCatalog issueCatalog;
@@ -43,7 +42,6 @@ public class IssueHierarchyService {
         Member caller = memberService.resolveMember(jwt);
         Issue issue = requireIssue(issueId);
         Project project = projectService.requireProject(issue.getProjectId());
-        projectPermissionService.require(caller, issue.getProjectId(), Permissions.EDIT_ISSUE);
 
         String newParentId = request.parentId();
         if (newParentId != null) {

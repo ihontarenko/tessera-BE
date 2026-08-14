@@ -1,5 +1,6 @@
 package net.innoventa.tessera.exception;
 
+import net.innoventa.tessera.security.access.AccessReason;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -26,6 +27,26 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(ForbiddenException.class)
     ProblemDetail handleForbidden(ForbiddenException exception) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.FORBIDDEN, exception.getMessage());
+    }
+
+    /**
+     * Every refusal the access engine produces, with the status the axis that answered decided.
+     *
+     * <p>The {@code reason} and {@code axis} properties travel beside the prose so that an interface can
+     * tell <em>ask to be added to this project</em> from <em>ask for this permission</em> without
+     * parsing a sentence somebody may reword.
+     */
+    @ExceptionHandler(AccessDeniedException.class)
+    ProblemDetail handleAccessDenied(AccessDeniedException exception) {
+        AccessReason reason = exception.getReason();
+
+        ProblemDetail problem = ProblemDetail.forStatus(reason.status());
+        problem.setTitle(reason.title());
+        problem.setDetail(exception.getMessage());
+        problem.setProperty("reason", reason.wireName());
+        problem.setProperty("axis", exception.getAxis().name().toLowerCase());
+
+        return problem;
     }
 
     @ExceptionHandler(InvalidRequestException.class)

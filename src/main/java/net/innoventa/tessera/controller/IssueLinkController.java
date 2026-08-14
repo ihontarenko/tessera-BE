@@ -4,7 +4,11 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import net.innoventa.tessera.dto.issue.CreateIssueLinkRequest;
 import net.innoventa.tessera.dto.issue.IssueResponse;
+import net.innoventa.tessera.domain.Issue;
+import net.innoventa.tessera.security.Permissions;
+import net.innoventa.tessera.security.access.Scopes;
 import net.innoventa.tessera.service.IssueLinkService;
+import org.jmouse.access.enforcement.RequiresAccess;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.DeleteMapping;
@@ -21,6 +25,8 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/issues/{issueId}/links")
 @RequiredArgsConstructor
+@RequiresAccess(permission = Permissions.EDIT_ISSUE, scope = Scopes.PROJECT,
+                resource = Issue.class, resourceId = "issueId")
 public class IssueLinkController {
 
     private final IssueLinkService issueLinkService;

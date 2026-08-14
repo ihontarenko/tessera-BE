@@ -26,7 +26,12 @@
         <lombok.mapstruct.binding.version>0.2.0</lombok.mapstruct.binding.version>
         <springdoc.version>2.5.0</springdoc.version>
         <testcontainers.version>1.19.8</testcontainers.version>
-        <jmouse.el.version>1.0.0-Stable_20260728</jmouse.el.version>
+        <!-- ⚠️ Held at the same version as everything else jMouse, and it has to be. `jmouse-access-el`
+             parses the policy document with `jmouse-el`'s parser and is built against this build of it;
+             pinned back to Stable_20260728 it loaded, started, and died on the first policy read with
+             NoClassDefFoundError: org/jmouse/el/parser/AutodetectFirstParser — from inside an
+             auto-configuration, naming a bean nobody wrote. -->
+        <jmouse.el.version>${jmouse.version}</jmouse.el.version>
         <jmouse.version>1.0.0-b20260802</jmouse.version>
     </properties>
 
@@ -134,12 +139,61 @@
             <version>${jmouse.el.version}</version>
         </dependency>
 
+        <!-- Authorization. Tessera's own model — a role per project plus per-member ALLOW/DENY
+             overrides — becomes grants the engine reads (`TesseraGrantStore`); the tables do not
+             change. What arrives is the five ordered axes, the covering chain, deny-wins with the
+             subtraction last, and a policy document that fails the boot on a permission nobody
+             declared.
+
+             ⚠️ The permission half only. The axes are independent, and a product with no
+             CapabilityCatalog has no entitlement axis and nothing refusing with 402. Tessera sells
+             nothing yet; capabilities wait until it does. -->
+        <dependency>
+            <groupId>org.jmouse</groupId>
+            <artifactId>jmouse-access</artifactId>
+            <version>${jmouse.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.jmouse</groupId>
+            <artifactId>jmouse-access-enforcement</artifactId>
+            <version>${jmouse.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.jmouse</groupId>
+            <artifactId>jmouse-access-spring-boot</artifactId>
+            <version>${jmouse.version}</version>
+        </dependency>
+        <!-- The engine's own schema and stores. ⚠️ jmouse-access-jpa OWNS every access_* table,
+             mapping included, and migrates them against a history table of its own — so Tessera
+             writes no @Entity over one and adds `org.jmouse.access.jpa.entity` to its @EntityScan.
+             Forgetting that line starts cleanly and dies on the first query, because Hibernate
+             validates only what it was given. -->
+        <dependency>
+            <groupId>org.jmouse</groupId>
+            <artifactId>jmouse-access-jpa</artifactId>
+            <version>${jmouse.version}</version>
+        </dependency>
+        <!-- The policy document. ⚠️ It is the SEED and the projection, never a second grant store:
+             what the engine reads is a row, and `policy/tessera.jmp` is what a fresh installation is
+             born with. jmouse-access-el is the grammar, jmouse-access-policy the model it binds to;
+             the auto-configuration only wakes up when both are on the classpath. -->
+        <dependency>
+            <groupId>org.jmouse</groupId>
+            <artifactId>jmouse-access-policy</artifactId>
+            <version>${jmouse.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.jmouse</groupId>
+            <artifactId>jmouse-access-el</artifactId>
+            <version>${jmouse.version}</version>
+        </dependency>
+
         <!-- The tool mechanism. Tessera contributed nothing to its design, which is the point: if a
              tracker can get tools and an assistant from a handful of ToolDefinition beans, the
              abstraction is real, and anything that has to change in the library is the most valuable
              finding of the whole effort.
 
-             ⚠️ Boot 3.3.2, so there is no jmouse-ai-spring-boot to lean on — every bean is
+             ⚠️ No starter. There is none for Boot 3 and deliberately will not be one — the beans are
              declared by hand in `config/AiConfiguration`, copied from Central's, which is the worked
              example that arrangement promises. Every module here is plain Java: `jmouse-ai` asks for
              no Spring, no JPA and no protocol SDK, and `jmouse-ai-provider` speaks
@@ -163,6 +217,16 @@
             <groupId>org.jmouse</groupId>
             <artifactId>jmouse-ai-jpa</artifactId>
             <version>${jmouse.version}</version>
+        </dependency>
+
+        <!-- The build rule. ⚠️ A handler under /api carrying neither @RequiresAccess nor
+             @PublicEndpoint fails the build — which is the only thing that makes "authorization is
+             declared where the route is served" true tomorrow as well as today. -->
+        <dependency>
+            <groupId>com.tngtech.archunit</groupId>
+            <artifactId>archunit-junit5</artifactId>
+            <version>1.3.0</version>
+            <scope>test</scope>
         </dependency>
 
         <!-- Testing -->

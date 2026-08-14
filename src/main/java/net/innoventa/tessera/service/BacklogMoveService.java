@@ -13,6 +13,7 @@ import net.innoventa.tessera.exception.BusinessRuleViolationException;
 import net.innoventa.tessera.exception.ResourceNotFoundException;
 import net.innoventa.tessera.repository.IssueTypeRepository;
 import net.innoventa.tessera.security.Permissions;
+import net.innoventa.tessera.security.access.ProjectAccess;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -42,7 +43,7 @@ public class BacklogMoveService {
     private final IssueTypeRepository issueTypeRepository;
 
     private final ProjectService projectService;
-    private final ProjectPermissionService projectPermissionService;
+    private final ProjectAccess projectAccess;
     private final MemberService memberService;
     private final IssueService issueService;
     private final SprintService sprintService;
@@ -54,7 +55,6 @@ public class BacklogMoveService {
     public BacklogResponse move(Jwt jwt, String projectId, BacklogMoveRequest request) {
         Member caller = memberService.resolveMember(jwt);
         projectService.requireProject(projectId);
-        projectPermissionService.requireVisible(caller.getId(), projectId);
 
         Issue issue = issueService.requireIssueInProject(request.issueKey(), projectId);
         Sprint targetSprint = resolveTargetSprint(projectId, request.targetSprintId());
@@ -65,10 +65,12 @@ public class BacklogMoveService {
         String targetSprintId = targetSprint == null ? null : targetSprint.getId();
         boolean membershipChanges = !Objects.equals(currentSprintId, targetSprintId);
 
+        // ⚠️ What a drag costs depends on where it lands, which is why this is here and not on the route:
+        // committing work to a sprint is a planning act, reordering the backlog is an edit.
         if (membershipChanges) {
-            projectPermissionService.require(caller, projectId, Permissions.MANAGE_SPRINT);
+            projectAccess.require(caller, projectId, Permissions.MANAGE_SPRINT);
         } else {
-            projectPermissionService.require(caller, projectId, Permissions.EDIT_ISSUE);
+            projectAccess.require(caller, projectId, Permissions.EDIT_ISSUE);
         }
 
         if (targetSprint != null) {

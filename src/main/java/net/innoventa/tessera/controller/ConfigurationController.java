@@ -12,6 +12,7 @@ import net.innoventa.tessera.dto.configuration.WorkflowResponse;
 import net.innoventa.tessera.dto.configuration.WorkflowSchemeResponse;
 import net.innoventa.tessera.dto.link.LinkTypeResponse;
 import net.innoventa.tessera.service.ConfigurationService;
+import org.jmouse.access.enforcement.RequiresAccess;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -22,10 +23,16 @@ import java.util.List;
  * Read-only exposure of the global configuration catalogs and schemes to any authenticated caller.
  * The aggregate {@code GET /api/configuration} is what the UI loads once; the per-catalog endpoints
  * exist for callers that need just one list.
+ *
+ * <p>A bare {@code @RequiresAccess}: these are the product's own catalogs — issue types, priorities,
+ * statuses, workflows — and carry no project's data, so a signed-in caller is the whole gate. What a
+ * <em>particular</em> project may create out of them is narrower and lives on
+ * {@code GET /api/projects/&#123;projectId&#125;/issue-types}, which is scoped.
  */
 @RestController
 @RequestMapping("/api/configuration")
 @RequiredArgsConstructor
+@RequiresAccess
 public class ConfigurationController {
 
     private final ConfigurationService configurationService;

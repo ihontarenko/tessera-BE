@@ -7,7 +7,10 @@ import net.innoventa.tessera.dto.sprint.CreateSprintRequest;
 import net.innoventa.tessera.dto.sprint.SprintSummary;
 import net.innoventa.tessera.dto.sprint.StartSprintRequest;
 import net.innoventa.tessera.dto.sprint.UpdateSprintRequest;
+import net.innoventa.tessera.security.Permissions;
+import net.innoventa.tessera.security.access.Scopes;
 import net.innoventa.tessera.service.SprintService;
+import org.jmouse.access.enforcement.RequiresAccess;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -31,11 +34,14 @@ import java.util.List;
  */
 @RestController
 @RequiredArgsConstructor
+@RequiresAccess(permission = Permissions.MANAGE_SPRINT, scope = Scopes.PROJECT)
 public class SprintController {
 
     private final SprintService sprintService;
 
+    /** The one read here, and the only method that overrides the class's write permission. */
     @GetMapping("/api/projects/{projectId}/sprints")
+    @RequiresAccess(permission = Permissions.BROWSE_PROJECT, scope = Scopes.PROJECT)
     public List<SprintSummary> list(@AuthenticationPrincipal Jwt jwt, @PathVariable String projectId) {
         return sprintService.list(jwt, projectId);
     }

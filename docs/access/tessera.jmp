@@ -1,0 +1,273 @@
+# =============================================================================
+#  Tessera's access, as it would be written if it adopted jmouse-access.
+#
+#  ⚠️ SPECULATIVE. NOTHING READS THIS FILE.
+#
+#  Tessera authorises locally today: `ProjectPermissionService` resolves
+#  `role permissions ∪ ALLOW overrides − DENY overrides` per project, and it
+#  already gets the important half right — deny wins. This file is what that
+#  model looks like written down rather than computed, plus the four things the
+#  local one cannot currently say.
+#
+#  ⚠️ IT MUST NOT MOVE INTO src/main/resources/policy/. That directory is a glob:
+#  any .jmp in it becomes a live policy. This one names scopes Tessera does not
+#  register yet, so it would not fail quietly — it would refuse to start. That is
+#  the correct behaviour and the reason this lives under docs/.
+#
+#  Read ACCESS-HANDOVER.md first; it is the adoption plan and this is its
+#  worked example. The model itself is Innoventa/BE/docs/access/README.md.
+# =============================================================================
+
+policy "tessera" {
+
+    # ── The floors ────────────────────────────────────────────────────────────
+    #
+    #  ⚠️ DECLARATION ORDER IS WIDTH ORDER. There is no rank column, deliberately —
+    #  a rank beside each scope is the same fact written twice, and the day the
+    #  two disagree the covering chain rebuilds itself with nobody editing it.
+    #  This block is checked against `TesseraScope.values()` POSITIONALLY.
+    #
+    #  BOARD is the floor Innoventa does not have, and ACCESS-HANDOVER.md calls it
+    #  the canary: three levels of nesting is what tests whether the library really
+    #  knows no product vocabulary. It is also the one that buys Tessera something
+    #  new — see PROJECT_CONTRACTOR below.
+    declare scopes {
+        @GLOBAL        everything
+        @ORGANIZATION  place  parameter=organizationId
+        @PROJECT       place  parameter=projectId
+        @BOARD         place  parameter=boardId
+        @SELF          'own-rows'
+    }
+
+
+    # ── What may be held ──────────────────────────────────────────────────────
+    #
+    #  ⚠️ THE NAMES ARE TESSERA'S EXISTING ONES, ON PURPOSE. They are the `name`
+    #  rows `V000004__authorization.sql` seeds and the constants in
+    #  `security/Permissions.java`, so this file is adoptable with no rename and no
+    #  data migration. The catalogue is cross-checked against the code in BOTH
+    #  directions at boot: a name here that no route asks for is litter, and one
+    #  the code asks for that is missing here is a refusal to start.
+    #
+    #  ⚠️ THE ONE ARGUMENT FOR RENAMING THEM, stated so it is a decision rather
+    #  than a drift: the policy editor groups permissions by the part before the
+    #  colon. `BROWSE_PROJECT` has no colon, so all nine would sit in one
+    #  undifferentiated group. At nine that is fine. At forty — which is roughly
+    #  where Innoventa sits — it is the difference between a list somebody reads
+    #  and a wall somebody scrolls. Renaming costs a migration over `permissions`
+    #  and `project_role_permissions`, and is worth doing before the catalogue
+    #  grows, or not at all.
+    declare permissions {
+        BROWSE_PROJECT      "View the project and its issues."
+        CREATE_ISSUE        "Create issues in the project."
+        EDIT_ISSUE          "Edit issue fields."
+        ASSIGN_ISSUE        "Assign issues to members."
+        TRANSITION_ISSUE    "Move issues through the workflow."
+        DELETE_ISSUE        "Delete issues."
+        ADD_COMMENT         "Comment on issues."
+        MANAGE_SPRINT       "Create and manage sprints."
+        ADMINISTER_PROJECT  "Administer the project — settings, membership, roles, overrides."
+    }
+
+
+    # ── What a call IS, as distinct from what it may touch ────────────────────
+    #
+    #  ⚠️ DOTS, NEVER COLONS. `EDIT_ISSUE` is a permission; `issue.edit` is an
+    #  action. One permission covers several routes that are not equally safe, and
+    #  the action says which one this is.
+    #
+    #  A rule may only name an action declared here and only read a value that
+    #  action publishes — a rule that could never fire is a boot failure rather
+    #  than a grant that silently does nothing.
+    declare actions {
+        issue.transition   "Move one issue through the workflow"  produces toStatus
+        issue.delete       "Delete one issue"                     produces sprintState
+        sprint.close       "Close a sprint"                       produces sprintState
+    }
+
+    declare variables {
+        constant deployment  "Which deployment this is"
+        dynamic  issueType   "The type of the issue this call is about — 'BUG', 'STORY', 'EPIC'"
+    }
+
+
+    # ── The three roles Tessera already has ───────────────────────────────────
+    #
+    #  These are `project_roles` verbatim, and the point of writing them out is
+    #  that they become reviewable in one place instead of being three INSERT
+    #  blocks in a migration.
+
+    declare role PROJECT_VIEWER assignable @PROJECT {
+        @PROJECT  BROWSE_PROJECT
+        @PROJECT  ADD_COMMENT
+    }
+
+    declare role PROJECT_DEVELOPER assignable @PROJECT {
+        @PROJECT  BROWSE_PROJECT
+        @PROJECT  CREATE_ISSUE
+        @PROJECT  ADD_COMMENT
+        @PROJECT  ASSIGN_ISSUE
+        @PROJECT  TRANSITION_ISSUE
+        @PROJECT  MANAGE_SPRINT
+
+        # ⚠️ THE FIRST THING THE LOCAL MODEL CANNOT SAY. Today EDIT_ISSUE is
+        # project-wide: a developer edits anybody's issue, or nobody's. `@SELF` is
+        # not a new mechanism — it is the narrowest width of the same axis — so
+        # "edit what you raised" costs a scope rather than an ownership check in
+        # every service that touches an issue.
+        @SELF     EDIT_ISSUE
+    }
+
+    declare role PROJECT_ADMINISTRATOR assignable @PROJECT {
+        @PROJECT  BROWSE_PROJECT
+        @PROJECT  CREATE_ISSUE
+        @PROJECT  EDIT_ISSUE
+        @PROJECT  ASSIGN_ISSUE
+        @PROJECT  TRANSITION_ISSUE
+        @PROJECT  DELETE_ISSUE
+        @PROJECT  ADD_COMMENT
+        @PROJECT  MANAGE_SPRINT
+        @PROJECT  ADMINISTER_PROJECT
+    }
+
+
+    # ── The three the local model has no shape for ────────────────────────────
+
+    #  ⚠️ ASSIGNABLE AT THE ACCOUNT, CARRIED AT THE PROJECT. One assignment covers
+    #  every project the account owns, and a project added next week is covered
+    #  without anybody editing anything. Today this is one membership row per
+    #  project, created by whoever remembers.
+    #
+    #  Note the widths: it reads everywhere and administers nothing. A programme
+    #  manager who could also change every project's settings would be a different
+    #  role, and would have to be written as one.
+    declare role PORTFOLIO_VIEWER assignable @ORGANIZATION {
+        @PROJECT  BROWSE_PROJECT
+        @PROJECT  ADD_COMMENT
+    }
+
+    #  ⚠️ THE BOARD FLOOR, EARNING ITS KEEP. An outside contractor works the
+    #  support board and must not see the roadmap board in the same project. There
+    #  is no way to write that today: the narrowest thing Tessera can grant is a
+    #  project.
+    declare role BOARD_CONTRACTOR assignable @BOARD {
+        @BOARD  BROWSE_PROJECT
+        @BOARD  ADD_COMMENT
+        @BOARD  TRANSITION_ISSUE
+        @SELF   EDIT_ISSUE
+    }
+
+    #  The one that must be separate from ordinary administration, and
+    #  ACCESS-HANDOVER.md says so: editing authorization without a deploy is the
+    #  sharpest power in the product, and it must not be implied by being able to
+    #  manage users. `SystemRole.ADMIN` is two values wide and cannot express this.
+    declare role ACCESS_EDITOR assignable @GLOBAL {
+        @GLOBAL  ADMINISTER_PROJECT
+    }
+
+
+    # ── Rules, which are the third thing the local model cannot say ───────────
+    #
+    #  A `ProjectPermissionOverride` is unconditional: a permission is on or off
+    #  for a member in a project. It cannot say "except in this circumstance".
+
+    assign subject * {
+        # Nobody deletes an issue out of a closed sprint — not a developer, not an
+        # administrator, not the person who raised it. The history of what a sprint
+        # contained is what every burndown and every velocity number is read from,
+        # and one deletion silently rewrites all of them.
+        #
+        # ⚠️ `subject *` may hold DENIALS and nothing else. A universal allow
+        # written here would be invisible to every screen that lists what one
+        # person holds — you would be unable to answer "why can they do this" by
+        # looking at them.
+        @GLOBAL DELETE_ISSUE deny when {
+            action == 'issue.delete' and sprintState == 'CLOSED'
+        }
+    }
+
+    assign subject 'qa-automation-account' {
+        # A service account that may move issues and nothing else, and only bugs.
+        # The condition is on the grant, so there is no window in which the
+        # permission exists unqualified.
+        grants PROJECT_VIEWER @PROJECT:'apollo'
+
+        @PROJECT TRANSITION_ISSUE allow when {
+            action == 'issue.transition' and issueType == 'BUG'
+        }
+    }
+
+
+    # ── What is sold ──────────────────────────────────────────────────────────
+    #
+    #  ⚠️ TESSERA CAN ADOPT THE PERMISSION HALF ALONE and leave everything below
+    #  until it sells something. The axes are independent: a product with no
+    #  `CapabilityCatalog` has no entitlement axis and nothing refuses. This block
+    #  is here to show the shape, not to argue for shipping it now.
+    #
+    #  ⚠️ Refusing on one of these is 402, not 403. The account is allowed to want
+    #  a fourth board and has not bought one — a different sentence from "you may
+    #  not", and a different next move for whoever reads it.
+
+    declare capabilities {
+        paid automation, insights
+
+        gate   automation  "Automation"
+        gate   insights    "Insights"
+
+        # `limit` counts what EXISTS — delete a board and the number is right again,
+        # with nothing to decrement. `quota` counts CONSUMPTION over a window and
+        # needs a counter. Different machinery, not one with a flag.
+        limit  project         "Projects"         per ORGANIZATION
+        limit  board           "Boards"           per PROJECT
+        limit  seat            "Seats"            per ORGANIZATION
+        quota  automation-run  "Automation runs"  per ORGANIZATION
+    }
+
+    declare plans {
+        plan solo "Solo" order 10 note "One project, three people — a team trying the tracker properly." {
+            project  1
+            board    2
+            seat     3
+        }
+
+        plan squad "Squad" order 20 note "A working team: several projects and the boards to run them." {
+            project  10
+            board    5
+            seat     25
+            automation-run  5000 per month
+            automation
+        }
+
+        # ⚠️ `extends` stores the DIFFERENCE and resolves it on read. A tier that
+        # copied its parent's lines would drift from it the first time the parent
+        # changed, and nothing would say so.
+        plan portfolio "Portfolio" order 30 extends squad note "Many teams, one account." {
+            project  unlimited
+            board    unlimited
+            seat     unlimited
+            automation-run  unlimited
+            insights
+        }
+    }
+
+    entitlements {
+        # ⚠️ Addressed by SLUG. The entitlement axis is the one
+        # `SubjectHandleResolver` is wired into, so this becomes an identifier at
+        # bind time. Forget that resolver and every line here parses, projects, and
+        # decides nothing — see ACCESS-HANDOVER.md, "the three that go wrong
+        # quietly".
+        @ORGANIZATION:'northwind'  plan squad
+
+        # Ends by arithmetic. There is no job to fail to run, and the screen can
+        # say when it stops because the date is right there.
+        @ORGANIZATION:'contoso'    trial portfolio until 2026-11-30
+            reason "Evaluating insights before the renewal."
+
+        # A gift that survives a tier change, because it was never a tier grant.
+        # This is the whole reason a grant records where it came from: changing the
+        # plan withdraws what the PLAN issued and touches nothing else.
+        @ORGANIZATION:'northwind'  allow insights
+            reason "Included while they pilot the reporting work — see the renewal thread."
+    }
+}

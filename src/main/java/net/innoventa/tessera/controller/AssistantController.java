@@ -5,6 +5,7 @@ import lombok.RequiredArgsConstructor;
 import net.innoventa.tessera.ai.AssistantService;
 import net.innoventa.tessera.dto.assistant.AssistantRequest;
 import net.innoventa.tessera.dto.assistant.AssistantResponse;
+import org.jmouse.access.enforcement.RequiresAccess;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.PostMapping;
 import org.springframework.web.bind.annotation.RequestBody;
@@ -28,6 +29,7 @@ import java.util.Map;
 @RestController
 @RequestMapping("/api/assistant")
 @RequiredArgsConstructor
+@RequiresAccess
 public class AssistantController {
 
     private final AssistantService assistantService;

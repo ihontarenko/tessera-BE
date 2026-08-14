@@ -2,7 +2,11 @@ package net.innoventa.tessera.controller;
 
 import lombok.RequiredArgsConstructor;
 import net.innoventa.tessera.dto.activity.ActivityLogResponse;
+import net.innoventa.tessera.domain.Issue;
+import net.innoventa.tessera.security.Permissions;
+import net.innoventa.tessera.security.access.Scopes;
 import net.innoventa.tessera.service.IssueActivityService;
+import org.jmouse.access.enforcement.RequiresAccess;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -18,6 +22,8 @@ import java.util.List;
 @RestController
 @RequestMapping("/api/issues/{issueId}/history")
 @RequiredArgsConstructor
+@RequiresAccess(permission = Permissions.BROWSE_PROJECT, scope = Scopes.PROJECT,
+                resource = Issue.class, resourceId = "issueId")
 public class IssueHistoryController {
 
     private final IssueActivityService issueActivityService;

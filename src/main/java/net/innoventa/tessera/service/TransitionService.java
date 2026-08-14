@@ -41,7 +41,6 @@ public class TransitionService {
     private final IssueRepository issueRepository;
     private final ResolutionRepository resolutionRepository;
     private final ProjectService projectService;
-    private final ProjectPermissionService projectPermissionService;
     private final MemberService memberService;
     private final WorkflowResolver workflowResolver;
     private final ActivityLogService activityLogService;
@@ -50,10 +49,19 @@ public class TransitionService {
 
     @Transactional
     public IssueResponse transition(Jwt jwt, String issueId, TransitionIssueRequest request) {
-        Member caller = memberService.resolveMember(jwt);
+        return transition(memberService.resolveMember(jwt), issueId, request);
+    }
+
+    /** The same, for a caller that is not an HTTP request — see {@code ProjectService.list(Member)}. */
+    @Transactional
+    public IssueResponse transition(Member caller, String issueId, TransitionIssueRequest request) {
         Issue issue = requireIssue(issueId);
         Project project = projectService.requireProject(issue.getProjectId());
-        projectPermissionService.require(caller, issue.getProjectId(), Permissions.TRANSITION_ISSUE);
+
+        // ⚠️ TRANSITION_ISSUE is gated on both ways in: the route declares it, and a tool call is
+        // refused by the dispatcher against the same engine. What is left below is the workflow's own
+        // refusals — a transition the scheme does not allow, a resolution the target status needs —
+        // which were never authorization and stay exactly where they are.
 
         Status target = workflowResolver.requireStatus(request.toStatusId());
         String workflowId = workflowResolver.resolveWorkflowId(project, issue.getIssueTypeId());

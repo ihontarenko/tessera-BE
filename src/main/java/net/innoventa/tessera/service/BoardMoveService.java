@@ -14,6 +14,7 @@ import net.innoventa.tessera.exception.BusinessRuleViolationException;
 import net.innoventa.tessera.exception.ResourceNotFoundException;
 import net.innoventa.tessera.repository.StatusRepository;
 import net.innoventa.tessera.security.Permissions;
+import net.innoventa.tessera.security.access.ProjectAccess;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -39,7 +40,7 @@ public class BoardMoveService {
     private final StatusRepository statusRepository;
     private final IssueService issueService;
     private final ProjectService projectService;
-    private final ProjectPermissionService projectPermissionService;
+    private final ProjectAccess projectAccess;
     private final MemberService memberService;
     private final WorkflowResolver workflowResolver;
     private final RankService rankService;
@@ -51,7 +52,6 @@ public class BoardMoveService {
     public BoardCardView move(Jwt jwt, String projectId, BoardMoveRequest request) {
         Member caller = memberService.resolveMember(jwt);
         Project project = projectService.requireProject(projectId);
-        projectPermissionService.requireVisible(caller.getId(), projectId);
 
         Issue issue = issueService.requireIssueInProject(request.issueKey(), projectId);
         Board board = boardService.requireBoard(projectId);
@@ -61,10 +61,12 @@ public class BoardMoveService {
         Status currentStatus = workflowResolver.requireStatus(issue.getStatusId());
         String currentColumnId = boardColumnResolver.resolveColumnId(currentStatus, mapping.columns(), mapping.statusToColumn());
 
+        // ⚠️ Which permission a drag costs depends on where the card lands, which is why the route
+        // declares only browsing: within a column it is a rank change, across one the workflow runs.
         if (targetColumn.getId().equals(currentColumnId)) {
-            projectPermissionService.require(caller, projectId, Permissions.EDIT_ISSUE);
+            projectAccess.require(caller, projectId, Permissions.EDIT_ISSUE);
         } else {
-            projectPermissionService.require(caller, projectId, Permissions.TRANSITION_ISSUE);
+            projectAccess.require(caller, projectId, Permissions.TRANSITION_ISSUE);
             String workflowId = workflowResolver.resolveWorkflowId(project, issue.getIssueTypeId());
             Status targetStatus = resolveTargetStatus(targetColumn, mapping, workflowId, issue.getStatusId());
             transitionService.transition(jwt, issue.getId(), new TransitionIssueRequest(targetStatus.getId(), request.resolutionId()));

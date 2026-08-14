@@ -10,7 +10,7 @@ import net.innoventa.tessera.dto.issue.IssueSearchResponse;
 import net.innoventa.tessera.repository.IssueRepository;
 import net.innoventa.tessera.repository.ProjectMembershipRepository;
 import net.innoventa.tessera.repository.ProjectRepository;
-import net.innoventa.tessera.security.Permissions;
+import net.innoventa.tessera.security.access.ProjectAccess;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -47,8 +47,7 @@ public class IssueSearchService {
 
     private final IssueRepository issueRepository;
     private final ProjectRepository projectRepository;
-    private final ProjectMembershipRepository membershipRepository;
-    private final ProjectPermissionService projectPermissionService;
+    private final ProjectAccess projectAccess;
     private final MemberService memberService;
     private final IssueAssembler issueAssembler;
 
@@ -114,16 +113,25 @@ public class IssueSearchService {
     }
 
     /**
-     * The projects this member may browse: membership first, since a non-member sees nothing at all
-     * (ADR-0002), then {@code BROWSE_PROJECT}, which an override can deny inside a project one belongs
-     * to. Exactly the pair {@code requireVisible} enforces one project at a time.
+     * The projects this member may browse.
+     *
+     * <p><strong>One question now, where it used to be two.</strong> It read the membership table and
+     * then asked, project by project, whether {@code BROWSE_PROJECT} survived an override there — a walk
+     * whose cost grew with how many projects somebody belonged to. The visibility scope answers the same
+     * thing in one resolution: which places the permission is held at, deny already subtracted. Membership
+     * is not a separate condition any more, because holding nothing at a project <em>is</em> not being in
+     * it.
+     *
+     * <p>⚠️ An installation-wide grant reads as "every project" and cannot be a list, so it is asked
+     * about separately — see {@code ProjectAccess.browsesEveryProject}. Nobody holds one today, and a
+     * search that silently returned nothing for the first person who did would be a bug found late.
      */
     private List<String> browsableProjectIds(Member caller) {
-        return membershipRepository.findByMemberId(caller.getId()).stream()
-            .map(ProjectMembership::getProjectId)
-            .distinct()
-            .filter(projectId -> projectPermissionService.hasPermission(caller.getId(), projectId, Permissions.BROWSE_PROJECT))
-            .toList();
+        if (projectAccess.browsesEveryProject(caller)) {
+            return projectRepository.findAll().stream().map(Project::getId).toList();
+        }
+
+        return projectAccess.visibleProjectIds(caller);
     }
 
     private IssueSearchResponse.Item toItem(IssueRowResponse row, Project project) {

@@ -33,6 +33,15 @@ spring:
     enabled: true
     locations: classpath:db/migration/mysql
     baseline-on-migrate: true
+    # ⚠️ 0, and it is load-bearing rather than tidy. `baseline-on-migrate` baselines a NON-EMPTY schema
+    # at `baseline-version`, which defaults to 1 — and Tessera's first migration IS version 1, so it
+    # would be skipped as "already applied". That never happened while this schema started empty. It
+    # starts non-empty now: `jmouse-ai-jpa` brings its own migrations and its own history table, and
+    # they run first so the entity manager can validate against the tables they create.
+    #
+    # Central hit exactly this and failed on V000002 with "table `translations` doesn't exist" — two
+    # steps from the cause. At 0 the baseline sits below everything and every migration still applies.
+    baseline-version: 0
     validate-on-migrate: true
     out-of-order: true
 
@@ -43,7 +52,12 @@ spring:
           jwk-set-uri: ${TESSERA_IDENTITY_JWK_SET_URI:http://localhost:9090/oauth2/jwks}
 
   jackson:
-    default-property-inclusion: non_null
+    # No `default-property-inclusion: non_null` here, deliberately. Omitting a null field makes the API
+    # disagree with the DTO that declares it: the client's mirror types say `string[] | null`, the field
+    # arrives as `undefined`, and every `=== null` written against it is silently always false. That is
+    # not theoretical — it is what made the board hide every card until a filter was applied, because
+    # `matchedCardIds` (null = "no filter was evaluated") simply was not in the payload. A nullable field
+    # is part of the contract, so it is sent.
     serialization:
       write-dates-as-timestamps: false
     deserialization:
@@ -83,6 +97,16 @@ tessera:
     # Central, Tessera is only ever called by its own frontend, so one fixed value, not an
     # allow-list.
     audience: ${TESSERA_AUDIENCE:tessera}
+
+jmouse:
+  access:
+    policy:
+      # ⚠️ NO LOCATIONS MEANS THE FEATURE IS OFF — no bean appears at all, the document is never read,
+      # and the seed never runs. A location that IS configured and matches nothing is the opposite case
+      # and refuses to start, which is the failure worth having: somebody asked for a file.
+      name: tessera
+      locations:
+        - classpath:policy/tessera.jmp
 
 logging:
   level:

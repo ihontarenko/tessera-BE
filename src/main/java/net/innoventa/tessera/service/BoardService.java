@@ -72,7 +72,6 @@ public class BoardService {
     private final MemberRepository memberRepository;
 
     private final ProjectService projectService;
-    private final ProjectPermissionService projectPermissionService;
     private final MemberService memberService;
     private final BoardColumnResolver boardColumnResolver;
     private final EpicResolver epicResolver;
@@ -88,7 +87,12 @@ public class BoardService {
      *               filter outlive the client-side stub it replaced and, later, move into SQL.
      */
     public BoardResponse getBoard(Jwt jwt, String projectId, String filter) {
-        LoadedBoard loaded = loadBoard(jwt, projectId);
+        return getBoard(memberService.resolveMember(jwt), projectId, filter);
+    }
+
+    /** The same, for a caller that is not an HTTP request — see {@code ProjectService.list(Member)}. */
+    public BoardResponse getBoard(Member caller, String projectId, String filter) {
+        LoadedBoard loaded = loadBoard(caller, projectId);
 
         Board board = loaded.board();
         List<Issue> issues = loaded.issues();
@@ -136,10 +140,8 @@ public class BoardService {
      * same scope, the same permissions, the same slice — rather than growing a second, subtly different
      * idea of what a project's issues are.
      */
-    private LoadedBoard loadBoard(Jwt jwt, String projectId) {
-        Member caller = memberService.resolveMember(jwt);
+    private LoadedBoard loadBoard(Member caller, String projectId) {
         projectService.requireProject(projectId);
-        projectPermissionService.requireVisible(caller.getId(), projectId);
 
         Board board = requireBoard(projectId);
 
@@ -172,7 +174,7 @@ public class BoardService {
      * can, and the count it reports is the count the member would actually get.
      */
     public FilterPreviewView previewFilter(Jwt jwt, String projectId, String expression) {
-        LoadedBoard loaded = loadBoard(jwt, projectId);
+        LoadedBoard loaded = loadBoard(memberService.resolveMember(jwt), projectId);
         List<IssueFilterView> views = issueFilterViewFactory.build(loaded.issues(), loaded.catalogs().epicKeys);
 
         try {
@@ -261,9 +263,13 @@ public class BoardService {
      * membership resolution, a member without the permission a {@code 403}.
      */
     public Board requireAdministrableBoard(Jwt jwt, String projectId) {
-        Member caller = memberService.resolveMember(jwt);
+        memberService.resolveMember(jwt);
         projectService.requireProject(projectId);
-        projectPermissionService.require(caller, projectId, Permissions.ADMINISTER_PROJECT);
+
+        // ⚠️ ADMINISTER_PROJECT is on the routes that reach here — BoardColumnController declares it once
+        // for all eight of its endpoints, and each board-settings route declares it for itself. What is
+        // left is the two facts a caller still needs: that they have a member row, and that the project
+        // and its board exist.
         return requireBoard(projectId);
     }
 

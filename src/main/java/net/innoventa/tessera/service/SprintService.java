@@ -47,16 +47,14 @@ public class SprintService {
     private final SprintRepository sprintRepository;
     private final IssueRepository issueRepository;
     private final ProjectService projectService;
-    private final ProjectPermissionService projectPermissionService;
     private final MemberService memberService;
     private final SprintMembershipService sprintMembershipService;
     private final Supplier<String> idGenerator;
 
     @Transactional(readOnly = true)
     public List<SprintSummary> list(Jwt jwt, String projectId) {
-        Member caller = memberService.resolveMember(jwt);
+        memberService.resolveMember(jwt);
         projectService.requireProject(projectId);
-        projectPermissionService.requireVisible(caller.getId(), projectId);
 
         return sprintRepository.findByProjectIdOrderByCreatedAtAsc(projectId).stream()
             .map(SprintSummary::from)
@@ -247,11 +245,17 @@ public class SprintService {
         return sprint;
     }
 
-    /** The {@code MANAGE_SPRINT} gate every sprint mutation shares, returning the acting member. */
+    /**
+     * The acting member, for a sprint mutation.
+     *
+     * <p>⚠️ It no longer checks {@code MANAGE_SPRINT} — {@code SprintController} declares it once for the
+     * whole class and the engine has refused before any of this runs. The name survives because what the
+     * method still asserts is worth asserting: that the caller has a member row, and that the project
+     * they name exists.
+     */
     private Member requireSprintManager(Jwt jwt, String projectId) {
         Member caller = memberService.resolveMember(jwt);
         projectService.requireProject(projectId);
-        projectPermissionService.require(caller, projectId, Permissions.MANAGE_SPRINT);
 
         return caller;
     }

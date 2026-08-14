@@ -36,7 +36,6 @@ public class IssueLinkService {
     private final IssueLinkRepository issueLinkRepository;
     private final LinkTypeRepository linkTypeRepository;
     private final ProjectService projectService;
-    private final ProjectPermissionService projectPermissionService;
     private final MemberService memberService;
     private final ActivityLogService activityLogService;
     private final IssueAssembler issueAssembler;
@@ -47,7 +46,6 @@ public class IssueLinkService {
         Member caller = memberService.resolveMember(jwt);
         Issue source = requireIssue(issueId);
         Project project = projectService.requireProject(source.getProjectId());
-        projectPermissionService.require(caller, source.getProjectId(), Permissions.EDIT_ISSUE);
 
         Issue target = requireIssue(request.targetIssueId());
         if (target.getId().equals(source.getId())) {
@@ -79,7 +77,6 @@ public class IssueLinkService {
         Member caller = memberService.resolveMember(jwt);
         Issue issue = requireIssue(issueId);
         Project project = projectService.requireProject(issue.getProjectId());
-        projectPermissionService.require(caller, issue.getProjectId(), Permissions.EDIT_ISSUE);
 
         IssueLink link = issueLinkRepository.findById(linkId)
             .orElseThrow(() -> new ResourceNotFoundException("Link not found: " + linkId));

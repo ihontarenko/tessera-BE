@@ -9,10 +9,15 @@ import net.innoventa.tessera.dto.issue.SetParentRequest;
 import net.innoventa.tessera.dto.issue.TransitionIssueRequest;
 import net.innoventa.tessera.dto.issue.UpdateIssueOrganizationRequest;
 import net.innoventa.tessera.dto.issue.UpdateIssueRequest;
+import net.innoventa.tessera.domain.Issue;
+import net.innoventa.tessera.security.Permissions;
+import net.innoventa.tessera.security.access.Scopes;
+import net.innoventa.tessera.security.access.target.IssueByKey;
 import net.innoventa.tessera.service.IssueHierarchyService;
 import net.innoventa.tessera.service.IssueOrganizationService;
 import net.innoventa.tessera.service.IssueService;
 import net.innoventa.tessera.service.TransitionService;
+import org.jmouse.access.enforcement.RequiresAccess;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -46,6 +51,7 @@ public class IssueController {
 
     @PostMapping("/api/projects/{projectId}/issues")
     @ResponseStatus(HttpStatus.CREATED)
+    @RequiresAccess(permission = Permissions.CREATE_ISSUE, scope = Scopes.PROJECT)
     public IssueResponse create(
         @AuthenticationPrincipal Jwt jwt,
         @PathVariable String projectId,
@@ -55,6 +61,7 @@ public class IssueController {
     }
 
     @GetMapping("/api/projects/{projectId}/issues")
+    @RequiresAccess(permission = Permissions.BROWSE_PROJECT, scope = Scopes.PROJECT)
     public List<IssueRowResponse> list(
         @AuthenticationPrincipal Jwt jwt,
         @PathVariable String projectId,
@@ -66,7 +73,14 @@ public class IssueController {
         return issueService.list(jwt, projectId, statusId, assigneeMemberId, issueTypeId, priorityId);
     }
 
+    /**
+     * ⚠️ <strong>The first route that names a resource</strong>, because it is the first that does not
+     * spell its project into the URL. {@code IssueAccessTargetResolver} answers where the issue lives and
+     * who reported it, and an identifier nothing resolves refuses as <em>no such row</em> rather than
+     * passing as an unscoped call.
+     */
     @GetMapping("/api/issues/{issueId}")
+    @RequiresAccess(permission = Permissions.BROWSE_PROJECT, scope = Scopes.PROJECT, resource = Issue.class)
     public IssueResponse get(@AuthenticationPrincipal Jwt jwt, @PathVariable String issueId) {
         return issueService.get(jwt, issueId);
     }
@@ -77,11 +91,14 @@ public class IssueController {
      * the two an argument is — a route that means one thing cannot be got wrong.
      */
     @GetMapping("/api/issues/by-key/{issueKey}")
+    @RequiresAccess(permission = Permissions.BROWSE_PROJECT, scope = Scopes.PROJECT,
+                    resource = IssueByKey.class, resourceId = "issueKey")
     public IssueResponse getByKey(@AuthenticationPrincipal Jwt jwt, @PathVariable String issueKey) {
         return issueService.getByKey(jwt, issueKey);
     }
 
     @PutMapping("/api/issues/{issueId}")
+    @RequiresAccess(permission = Permissions.EDIT_ISSUE, scope = Scopes.PROJECT, resource = Issue.class)
     public IssueResponse update(
         @AuthenticationPrincipal Jwt jwt,
         @PathVariable String issueId,
@@ -92,11 +109,19 @@ public class IssueController {
 
     @DeleteMapping("/api/issues/{issueId}")
     @ResponseStatus(HttpStatus.NO_CONTENT)
+    @RequiresAccess(permission = Permissions.DELETE_ISSUE, scope = Scopes.PROJECT, resource = Issue.class)
     public void delete(@AuthenticationPrincipal Jwt jwt, @PathVariable String issueId) {
         issueService.delete(jwt, issueId);
     }
 
+    /**
+     * ⚠️ <strong>The permission is the whole of what this annotation decides.</strong> Whether the
+     * transition is <em>legal</em> — that the scheme allows it from here, that the resolution it needs is
+     * present — is the workflow engine's, and stays exactly where it is. Those are domain refusals and
+     * were never authorization; moving them here would be the mistake this cutover is otherwise avoiding.
+     */
     @PostMapping("/api/issues/{issueId}/transitions")
+    @RequiresAccess(permission = Permissions.TRANSITION_ISSUE, scope = Scopes.PROJECT, resource = Issue.class)
     public IssueResponse transition(
         @AuthenticationPrincipal Jwt jwt,
         @PathVariable String issueId,
@@ -106,6 +131,7 @@ public class IssueController {
     }
 
     @PutMapping("/api/issues/{issueId}/parent")
+    @RequiresAccess(permission = Permissions.EDIT_ISSUE, scope = Scopes.PROJECT, resource = Issue.class)
     public IssueResponse setParent(
         @AuthenticationPrincipal Jwt jwt,
         @PathVariable String issueId,
@@ -115,6 +141,7 @@ public class IssueController {
     }
 
     @PutMapping("/api/issues/{issueId}/organization")
+    @RequiresAccess(permission = Permissions.EDIT_ISSUE, scope = Scopes.PROJECT, resource = Issue.class)
     public IssueResponse updateOrganization(
         @AuthenticationPrincipal Jwt jwt,
         @PathVariable String issueId,

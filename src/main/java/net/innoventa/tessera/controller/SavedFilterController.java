@@ -6,8 +6,11 @@ import net.innoventa.tessera.dto.filter.FilterPreviewView;
 import net.innoventa.tessera.dto.filter.PreviewFilterRequest;
 import net.innoventa.tessera.dto.filter.SaveFilterRequest;
 import net.innoventa.tessera.dto.filter.SavedFilterView;
+import net.innoventa.tessera.security.Permissions;
+import net.innoventa.tessera.security.access.Scopes;
 import net.innoventa.tessera.service.BoardService;
 import net.innoventa.tessera.service.SavedFilterService;
+import org.jmouse.access.enforcement.RequiresAccess;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -29,9 +32,19 @@ import java.util.List;
  * {@code GET /api/projects/{projectId}/board?filter=…} — there is no "run this filter" endpoint,
  * because a filter is a string, not a stored procedure.
  */
+/**
+ * ⚠️ <strong>Browsing the project is the whole declaration, and ownership is the service's.</strong> A
+ * saved filter is a personal thing that lives in a project: anybody who can see the project may write
+ * one, and only its owner (or a shared one) may change it. That second half is a question about
+ * <em>whose row this is</em>, which the covering chain would answer with {@code @SELF} — but a filter is
+ * not gated on a permission of its own, so there is nothing at {@code @SELF} to hold. Inventing a
+ * {@code FILTER_WRITE} permission to make the annotation fuller would be a new rule for the sake of a
+ * tidier declaration.
+ */
 @RestController
 @RequiredArgsConstructor
 @RequestMapping("/api/projects/{projectId}/filters")
+@RequiresAccess(permission = Permissions.BROWSE_PROJECT, scope = Scopes.PROJECT)
 public class SavedFilterController {
 
     private final SavedFilterService savedFilterService;

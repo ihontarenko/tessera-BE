@@ -16,6 +16,7 @@ import net.innoventa.tessera.repository.IssueLinkRepository;
 import net.innoventa.tessera.repository.IssueRepository;
 import net.innoventa.tessera.repository.PriorityRepository;
 import net.innoventa.tessera.security.Permissions;
+import net.innoventa.tessera.security.access.ProjectAccess;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -51,7 +52,7 @@ public class IssueService {
 
     private final ProjectService projectService;
     private final ProjectIssueTypeService projectIssueTypeService;
-    private final ProjectPermissionService projectPermissionService;
+    private final ProjectAccess projectAccess;
     private final MemberService memberService;
     private final WorkflowResolver workflowResolver;
     private final RankService rankService;
@@ -66,7 +67,6 @@ public class IssueService {
     public IssueResponse create(Jwt jwt, String projectId, CreateIssueRequest request) {
         Member caller = memberService.resolveMember(jwt);
         Project project = projectService.requireProject(projectId);
-        projectPermissionService.require(caller, projectId, Permissions.CREATE_ISSUE);
 
         // The scheme is a constraint, not a suggestion: the dialog offers only what it grants, and a
         // caller reaching the API directly is held to the same list. Before the key is allocated, so a
@@ -117,9 +117,8 @@ public class IssueService {
         String issueTypeId,
         String priorityId
     ) {
-        Member caller = memberService.resolveMember(jwt);
+        memberService.resolveMember(jwt);
         projectService.requireProject(projectId);
-        projectPermissionService.requireVisible(caller.getId(), projectId);
 
         List<Issue> issues = issueRepository.findByProjectIdOrderByRankAsc(projectId).stream()
             .filter(issue -> statusId == null || statusId.equals(issue.getStatusId()))
@@ -156,9 +155,8 @@ public class IssueService {
      * so addressing an issue by key can never be the cheaper way in.
      */
     private IssueResponse detail(Jwt jwt, Issue issue) {
-        Member caller = memberService.resolveMember(jwt);
+        memberService.resolveMember(jwt);
         Project project = projectService.requireProject(issue.getProjectId());
-        projectPermissionService.requireVisible(caller.getId(), issue.getProjectId());
 
         return issueAssembler.detail(issue, project);
     }
@@ -168,7 +166,6 @@ public class IssueService {
         Member caller = memberService.resolveMember(jwt);
         Issue issue = requireIssue(issueId);
         Project project = projectService.requireProject(issue.getProjectId());
-        projectPermissionService.require(caller, issue.getProjectId(), Permissions.EDIT_ISSUE);
 
         requirePriority(request.priorityId());
 
@@ -197,9 +194,8 @@ public class IssueService {
 
     @Transactional
     public void delete(Jwt jwt, String issueId) {
-        Member caller = memberService.resolveMember(jwt);
+        memberService.resolveMember(jwt);
         Issue issue = requireIssue(issueId);
-        projectPermissionService.require(caller, issue.getProjectId(), Permissions.DELETE_ISSUE);
 
         // Detach children so the hierarchy does not dangle, then remove every satellite that FK-references
         // this issue before the issue itself.
@@ -249,12 +245,20 @@ public class IssueService {
         return neighbourIssueKey == null ? null : requireIssueInProject(neighbourIssueKey, projectId).getRank();
     }
 
-    /** Setting an assignee additionally requires {@code ASSIGN_ISSUE}; the assignee must be a member. */
+    /**
+     * Setting an assignee additionally requires {@code ASSIGN_ISSUE}; the assignee must be a member.
+     *
+     * <p>⚠️ <strong>One of the few checks that stays in a service.</strong> It is not the route's
+     * permission — creating and editing an issue cost their own — it is a <em>further</em> one, owed only
+     * when the request happens to name somebody. An annotation names one permission for the whole call,
+     * so expressing this there would mean either refusing every edit to a member who may not assign, or
+     * letting an assignment through under {@code EDIT_ISSUE}.
+     */
     private String resolveAssignee(Member caller, String projectId, String assigneeMemberId) {
         if (assigneeMemberId == null) {
             return null;
         }
-        projectPermissionService.require(caller, projectId, Permissions.ASSIGN_ISSUE);
+        projectAccess.require(caller, projectId, Permissions.ASSIGN_ISSUE);
         return memberService.requireMember(assigneeMemberId).getId();
     }
 

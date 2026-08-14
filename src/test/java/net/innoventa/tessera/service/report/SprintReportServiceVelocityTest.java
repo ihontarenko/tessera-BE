@@ -146,14 +146,16 @@ class SprintReportServiceVelocityTest {
     }
 
     @Test
-    @DisplayName("goes through the same visibility gate every project-scoped read uses")
-    void goesThroughTheVisibilityGate() {
+    @DisplayName("still asserts the project exists before reading anything of it")
+    void assertsTheProjectExists() {
         when(sprintService.closedSprints(PROJECT_ID)).thenReturn(List.of());
 
         sprintReportService.getVelocity(jwt, PROJECT_ID);
 
+        // ⚠️ The visibility half of this assertion is gone with the check it asserted. ReportController
+        // declares BROWSE_PROJECT at the project, so a non-member never reaches this service — and a
+        // verify() against a collaborator that no longer collaborates would pass while testing nothing.
         verify(projectService).requireProject(PROJECT_ID);
-        verify(projectPermissionService).requireVisible(CALLER.getId(), PROJECT_ID);
     }
 
     private Sprint closedSprint(String sprintId, String name) {

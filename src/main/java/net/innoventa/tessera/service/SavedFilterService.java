@@ -48,7 +48,6 @@ public class SavedFilterService {
     private final SavedFilterRepository savedFilterRepository;
     private final MemberRepository memberRepository;
     private final ProjectService projectService;
-    private final ProjectPermissionService projectPermissionService;
     private final MemberService memberService;
     private final BoardFilterEvaluator boardFilterEvaluator;
     private final Supplier<String> idGenerator;
@@ -112,10 +111,17 @@ public class SavedFilterService {
         savedFilterRepository.delete(requireOwnedFilter(projectId, savedFilterId, caller));
     }
 
+    /**
+     * The acting member, for a route that has already been refused about the project.
+     *
+     * <p>{@code SavedFilterController} declares {@code BROWSE_PROJECT} at the project for every route
+     * here, so the visibility gate this used to run is the route's. What remains is resolving the caller
+     * and asserting the project exists.
+     */
     private Member requireVisibleProject(Jwt jwt, String projectId) {
         Member caller = memberService.resolveMember(jwt);
         projectService.requireProject(projectId);
-        projectPermissionService.requireVisible(caller.getId(), projectId);
+
         return caller;
     }
 

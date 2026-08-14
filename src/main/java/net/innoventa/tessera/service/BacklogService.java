@@ -67,16 +67,14 @@ public class BacklogService {
     private final MemberRepository memberRepository;
 
     private final ProjectService projectService;
-    private final ProjectPermissionService projectPermissionService;
     private final MemberService memberService;
     private final BoardService boardService;
     private final BoardColumnResolver boardColumnResolver;
     private final SprintMembershipService sprintMembershipService;
 
     public BacklogResponse getBacklog(Jwt jwt, String projectId) {
-        Member caller = memberService.resolveMember(jwt);
+        memberService.resolveMember(jwt);
         projectService.requireProject(projectId);
-        projectPermissionService.requireVisible(caller.getId(), projectId);
 
         return render(projectId);
     }

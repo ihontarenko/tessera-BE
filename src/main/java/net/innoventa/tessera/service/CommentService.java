@@ -13,6 +13,7 @@ import net.innoventa.tessera.repository.CommentRepository;
 import net.innoventa.tessera.repository.IssueRepository;
 import net.innoventa.tessera.repository.MemberRepository;
 import net.innoventa.tessera.security.Permissions;
+import net.innoventa.tessera.security.access.ProjectAccess;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -33,7 +34,7 @@ public class CommentService {
     private final CommentRepository commentRepository;
     private final IssueRepository issueRepository;
     private final MemberRepository memberRepository;
-    private final ProjectPermissionService projectPermissionService;
+    private final ProjectAccess projectAccess;
     private final MemberService memberService;
     private final Supplier<String> idGenerator;
 
@@ -41,7 +42,6 @@ public class CommentService {
     public List<CommentResponse> list(Jwt jwt, String issueId) {
         Member caller = memberService.resolveMember(jwt);
         Issue issue = requireIssue(issueId);
-        projectPermissionService.requireVisible(caller.getId(), issue.getProjectId());
 
         return commentRepository.findByIssueIdOrderByCreatedAtAsc(issueId).stream()
             .map(comment -> toResponse(comment, caller, issue.getProjectId()))
@@ -52,7 +52,6 @@ public class CommentService {
     public CommentResponse add(Jwt jwt, String issueId, SaveCommentRequest request) {
         Member caller = memberService.resolveMember(jwt);
         Issue issue = requireIssue(issueId);
-        projectPermissionService.require(caller, issue.getProjectId(), Permissions.ADD_COMMENT);
 
         Comment comment = commentRepository.save(Comment.builder()
             .id(idGenerator.get())
@@ -69,9 +68,9 @@ public class CommentService {
         Member caller = memberService.resolveMember(jwt);
         Issue issue = requireIssue(issueId);
         Comment comment = requireComment(commentId, issueId);
-        projectPermissionService.require(caller, issue.getProjectId(), Permissions.ADD_COMMENT);
 
-        // A member edits only their own comment (ticket 13).
+        // A member edits only their own comment (ticket 13). ADD_COMMENT is on the route; this is the
+        // half an annotation cannot phrase, because it is about whose row this is.
         if (!comment.getAuthorMemberId().equals(caller.getId())) {
             throw new ForbiddenException("You can only edit your own comment");
         }
@@ -87,7 +86,7 @@ public class CommentService {
         Comment comment = requireComment(commentId, issueId);
 
         boolean isAuthor = comment.getAuthorMemberId().equals(caller.getId());
-        boolean isAdministrator = projectPermissionService.hasPermission(caller.getId(), issue.getProjectId(), Permissions.ADMINISTER_PROJECT);
+        boolean isAdministrator = projectAccess.holds(caller, issue.getProjectId(), Permissions.ADMINISTER_PROJECT);
         if (!isAuthor && !isAdministrator) {
             throw new ForbiddenException("You can only delete your own comment");
         }
@@ -101,7 +100,7 @@ public class CommentService {
             .orElse(null);
 
         boolean isAuthor = comment.getAuthorMemberId().equals(caller.getId());
-        boolean isAdministrator = projectPermissionService.hasPermission(caller.getId(), projectId, Permissions.ADMINISTER_PROJECT);
+        boolean isAdministrator = projectAccess.holds(caller, projectId, Permissions.ADMINISTER_PROJECT);
 
         return new CommentResponse(
             comment.getId(),

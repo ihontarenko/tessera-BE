@@ -5,6 +5,7 @@ import net.innoventa.tessera.dto.filter.BoardFilterView;
 import net.innoventa.tessera.dto.filter.FilterGrammarView;
 import net.innoventa.tessera.service.filter.BuiltInBoardFilters;
 import net.innoventa.tessera.service.filter.FilterGrammarReference;
+import org.jmouse.access.enforcement.RequiresAccess;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RestController;
 
@@ -19,6 +20,7 @@ import java.util.List;
  */
 @RestController
 @RequiredArgsConstructor
+@RequiresAccess
 public class BoardFilterController {
 
     private final BuiltInBoardFilters builtInBoardFilters;

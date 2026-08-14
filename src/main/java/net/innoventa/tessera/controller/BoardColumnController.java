@@ -7,7 +7,10 @@ import net.innoventa.tessera.dto.board.CreateBoardColumnRequest;
 import net.innoventa.tessera.dto.board.ReorderBoardColumnRequest;
 import net.innoventa.tessera.dto.board.SetColumnFallbackRequest;
 import net.innoventa.tessera.dto.board.UpdateBoardColumnRequest;
+import net.innoventa.tessera.security.Permissions;
+import net.innoventa.tessera.security.access.Scopes;
 import net.innoventa.tessera.service.BoardColumnService;
+import org.jmouse.access.enforcement.RequiresAccess;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -22,7 +25,8 @@ import org.springframework.web.bind.annotation.RestController;
 
 /**
  * Board column configuration (Phase-2 ticket 03) — every operation here requires
- * {@code ADMINISTER_PROJECT} (enforced in {@link BoardColumnService}). Reshaping the column list
+ * {@code ADMINISTER_PROJECT}, declared once on the class because all eight cost the same and a column is
+ * only ever addressed inside its project's path. Reshaping the column list
  * (create/rename/reorder/delete/WIP) and the fallback role are distinct concerns from the explicit
  * status→column overrides, split across their own sub-paths for the same reason
  * {@link net.innoventa.tessera.domain.BoardColumnStatus} is its own table: a status mapping is a
@@ -31,6 +35,7 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 @RequestMapping("/api/projects/{projectId}/board/columns")
 @RequiredArgsConstructor
+@RequiresAccess(permission = Permissions.ADMINISTER_PROJECT, scope = Scopes.PROJECT)
 public class BoardColumnController {
 
     private final BoardColumnService boardColumnService;

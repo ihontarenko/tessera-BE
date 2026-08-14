@@ -6,6 +6,7 @@ import net.innoventa.tessera.dto.CurrentMemberResponse;
 import net.innoventa.tessera.dto.MemberSummary;
 import net.innoventa.tessera.exception.ResourceNotFoundException;
 import net.innoventa.tessera.repository.MemberRepository;
+import net.innoventa.tessera.security.access.InstallationAccess;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
@@ -28,8 +29,9 @@ import java.util.Objects;
 @RequiredArgsConstructor
 public class MemberService {
 
-    private final MemberRepository memberRepository;
-    private final MemberProvisioner memberProvisioner;
+    private final MemberRepository    memberRepository;
+    private final MemberProvisioner   memberProvisioner;
+    private final InstallationAccess  installationAccess;
 
     /**
      * Find-or-provision the local {@link Member} for a validated token. New subjects are provisioned
@@ -48,9 +50,20 @@ public class MemberService {
             .orElseGet(() -> provision(subject, displayName, email));
     }
 
+    /**
+     * The caller as the shell renders them, with what they hold installation-wide.
+     *
+     * <p>The permissions are resolved here rather than left to the client to guess, because the sidebar
+     * has to decide whether to offer Administration before anything is clicked. ⚠️ It is a courtesy and
+     * never the authorization — see {@link net.innoventa.tessera.security.access.InstallationAccess}.
+     */
     @Transactional(readOnly = true)
     public CurrentMemberResponse describe(Member member) {
-        return CurrentMemberResponse.from(member);
+        List<String> globalPermissions = installationAccess.permissionsOf(member).stream()
+            .sorted()
+            .toList();
+
+        return CurrentMemberResponse.from(member, globalPermissions);
     }
 
     @Transactional(readOnly = true)

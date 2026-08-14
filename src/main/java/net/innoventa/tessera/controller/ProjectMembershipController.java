@@ -6,7 +6,10 @@ import net.innoventa.tessera.dto.membership.AddProjectMemberRequest;
 import net.innoventa.tessera.dto.membership.ProjectMemberResponse;
 import net.innoventa.tessera.dto.membership.SetMemberRolesRequest;
 import net.innoventa.tessera.dto.membership.SetPermissionOverrideRequest;
+import net.innoventa.tessera.security.Permissions;
+import net.innoventa.tessera.security.access.Scopes;
 import net.innoventa.tessera.service.ProjectMembershipService;
+import org.jmouse.access.enforcement.RequiresAccess;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -24,17 +27,27 @@ import java.util.List;
 
 /**
  * Project access administration — members, their roles, and their individual permission overrides.
- * Every mutation requires {@code ADMINISTER_PROJECT} (enforced in the service); the deny-wins model
- * is exercised end-to-end whenever a guarded action here or elsewhere returns {@code 403}.
+ *
+ * <p>The class declares {@code ADMINISTER_PROJECT} at the project, because that is what every mutation
+ * here costs; the one read overrides it downwards. Writing it once and letting the read say what it
+ * needs is the shape the annotation is for — the alternative, five identical lines and one different
+ * one, is where somebody eventually pastes the wrong one.
+ *
+ * <p>⚠️ <strong>The permission is on the route now, not in the service.</strong> The deny-wins model it
+ * edits is the engine's, and every change made here is written into {@code access_*} as well as into the
+ * retiring local tables — see {@code LocalAuthorizationMirror}.
  */
 @RestController
 @RequestMapping("/api/projects/{projectId}/members")
 @RequiredArgsConstructor
+@RequiresAccess(permission = Permissions.ADMINISTER_PROJECT, scope = Scopes.PROJECT)
 public class ProjectMembershipController {
 
     private final ProjectMembershipService membershipService;
 
+    /** Who is in this project — an ordinary read, so browsing it is enough. */
     @GetMapping
+    @RequiresAccess(permission = Permissions.BROWSE_PROJECT, scope = Scopes.PROJECT)
     public List<ProjectMemberResponse> list(@AuthenticationPrincipal Jwt jwt, @PathVariable String projectId) {
         return membershipService.listMembers(jwt, projectId);
     }

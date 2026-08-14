@@ -9,9 +9,12 @@ import net.innoventa.tessera.dto.board.BoardSettingsView;
 import net.innoventa.tessera.dto.board.SetDoneThresholdRequest;
 import net.innoventa.tessera.dto.board.SetScopeStrategyRequest;
 import net.innoventa.tessera.dto.board.SetSwimlaneStrategyRequest;
+import net.innoventa.tessera.security.Permissions;
+import net.innoventa.tessera.security.access.Scopes;
 import net.innoventa.tessera.service.BoardMoveService;
 import net.innoventa.tessera.service.BoardService;
 import net.innoventa.tessera.service.BoardSettingsService;
+import org.jmouse.access.enforcement.RequiresAccess;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -31,6 +34,7 @@ import org.springframework.web.bind.annotation.RestController;
  */
 @RestController
 @RequiredArgsConstructor
+@RequiresAccess(permission = Permissions.BROWSE_PROJECT, scope = Scopes.PROJECT)
 public class BoardController {
 
     private final BoardService boardService;
@@ -52,6 +56,12 @@ public class BoardController {
         return boardService.getBoard(jwt, projectId, filter);
     }
 
+    /**
+     * ⚠️ <strong>Declared on browsing, and the write permission is decided inside</strong> — the same
+     * shape as the backlog's move and for the same reason. A drag within a column is {@code EDIT_ISSUE}
+     * (a rank changes); a drag across one is {@code TRANSITION_ISSUE} (the workflow engine runs). Which
+     * it is depends on where the card lands, which the annotation cannot see.
+     */
     @PostMapping("/api/projects/{projectId}/board/move")
     public BoardCardView move(
         @AuthenticationPrincipal Jwt jwt,
@@ -64,6 +74,7 @@ public class BoardController {
     /** Board-wide view settings, each set on its own so none overwrites another from a stale copy; all
      *  require {@code ADMINISTER_PROJECT}. */
     @PutMapping("/api/projects/{projectId}/board/settings/swimlane-strategy")
+    @RequiresAccess(permission = Permissions.ADMINISTER_PROJECT, scope = Scopes.PROJECT)
     public BoardSettingsView setSwimlaneStrategy(
         @AuthenticationPrincipal Jwt jwt,
         @PathVariable String projectId,
@@ -73,6 +84,7 @@ public class BoardController {
     }
 
     @PutMapping("/api/projects/{projectId}/board/settings/done-threshold")
+    @RequiresAccess(permission = Permissions.ADMINISTER_PROJECT, scope = Scopes.PROJECT)
     public BoardSettingsView setDoneThreshold(
         @AuthenticationPrincipal Jwt jwt,
         @PathVariable String projectId,
@@ -87,6 +99,7 @@ public class BoardController {
      * only: no sprint is started, closed or touched by it.
      */
     @PutMapping("/api/projects/{projectId}/board/settings/scope-strategy")
+    @RequiresAccess(permission = Permissions.ADMINISTER_PROJECT, scope = Scopes.PROJECT)
     public BoardSettingsView setScopeStrategy(
         @AuthenticationPrincipal Jwt jwt,
         @PathVariable String projectId,

@@ -1,15 +1,11 @@
 package net.innoventa.tessera.service;
 
 import lombok.RequiredArgsConstructor;
-import net.innoventa.tessera.domain.Member;
 import net.innoventa.tessera.domain.PermissionEffect;
 import net.innoventa.tessera.domain.ProjectMembership;
 import net.innoventa.tessera.domain.ProjectPermissionOverride;
 import net.innoventa.tessera.dto.membership.PermissionResponse;
 import net.innoventa.tessera.dto.membership.RoleSummary;
-import net.innoventa.tessera.exception.ForbiddenException;
-import net.innoventa.tessera.exception.ResourceNotFoundException;
-import net.innoventa.tessera.security.Permissions;
 import net.innoventa.tessera.repository.PermissionRepository;
 import net.innoventa.tessera.repository.ProjectMembershipRepository;
 import net.innoventa.tessera.repository.ProjectPermissionOverrideRepository;
@@ -23,15 +19,24 @@ import java.util.List;
 import java.util.Set;
 
 /**
- * The project-scoped authorization resolver and the reusable permission-check component every guarded
- * endpoint gates through. Effective permissions in a project are
- * {@code role permissions ∪ ALLOW overrides − DENY overrides}, with <strong>deny winning</strong> —
- * the exact resolution Moneta's {@code UserService.privilegeNames} uses, here scoped to a project
- * (CONTEXT.md, "ProjectPermissionOverride"; ADR-0003 of the local-authorization ticket).
- * <p>
- * Permissions are resolved per action rather than flattened onto the security principal because a
- * member holds a different set in each of their projects. A missing permission raises
- * {@link ForbiddenException} → {@code 403}.
+ * ⚠️ <strong>Retired. It authorizes nothing, and it is kept for exactly one reason.</strong>
+ *
+ * <p>This was the project-scoped authorization resolver every guarded endpoint gated through —
+ * {@code role permissions ∪ ALLOW overrides − DENY overrides}, deny winning, joined through
+ * {@code project_roles} and {@code permissions}. Authorization is {@code jmouse-access}'s now: a route
+ * declares what it needs with {@code @RequiresAccess} and the engine resolves it over {@code access_*}
+ * rows. Every one of the thirty-eight {@code require*} call sites is gone.
+ *
+ * <p>What is left is a <strong>second opinion to compare against</strong>.
+ * {@link net.innoventa.tessera.security.access.ParallelAuthorizationCheck} asks both models the same
+ * questions at startup, over this installation's real data, and reports every answer they disagree
+ * about — which is the only thing that turns "we replaced the authorization model" from a hope into a
+ * fact. It cannot do that against a class that has been deleted.
+ *
+ * <p>⚠️ <strong>It goes with V000014</strong>, together with the tables it reads, the check that reads
+ * it, and {@code LocalAuthorizationMirror}. Nothing new should call it; the two catalog methods below
+ * are still read by {@code AuthorizationCatalogController}, whose pickers speak the identifiers those
+ * tables hand out and move in the same change.
  */
 @Service
 @RequiredArgsConstructor
@@ -84,40 +89,6 @@ public class ProjectPermissionService {
         return permissionRepository.findAllById(effectivePermissionIds).stream()
             .map(net.innoventa.tessera.domain.Permission::getName)
             .collect(java.util.stream.Collectors.toSet());
-    }
-
-    public boolean hasPermission(String memberId, String projectId, String permissionName) {
-        return effectivePermissions(memberId, projectId).contains(permissionName);
-    }
-
-    public boolean isMember(String memberId, String projectId) {
-        return membershipRepository.existsByProjectIdAndMemberId(projectId, memberId);
-    }
-
-    /**
-     * Read visibility for a project-scoped resource. A non-member cannot even know the project exists
-     * (membership-based isolation, ADR-0002), so their access is a {@code 404}, not a {@code 403};
-     * a member without {@code BROWSE_PROJECT} (e.g. denied by an override) gets a {@code 403}. The
-     * single gate every read endpoint on a project's issues, comments and history uses.
-     */
-    public void requireVisible(String memberId, String projectId) {
-        if (!isMember(memberId, projectId)) {
-            throw new ResourceNotFoundException("Project not found: " + projectId);
-        }
-        if (!hasPermission(memberId, projectId, Permissions.BROWSE_PROJECT)) {
-            throw new ForbiddenException("Missing permission '" + Permissions.BROWSE_PROJECT + "' in project " + projectId);
-        }
-    }
-
-    /**
-     * Gate an action: throw {@link ForbiddenException} ({@code 403}) unless the member holds
-     * {@code permissionName} in the project. The reusable check every project-scoped mutation calls.
-     */
-    public void require(Member member, String projectId, String permissionName) {
-        if (!hasPermission(member.getId(), projectId, permissionName)) {
-            throw new ForbiddenException(
-                "Missing permission '" + permissionName + "' in project " + projectId);
-        }
     }
 
 }

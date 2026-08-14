@@ -22,6 +22,8 @@ import net.innoventa.tessera.repository.ProjectRepository;
 import net.innoventa.tessera.repository.ProjectRoleRepository;
 import net.innoventa.tessera.repository.WorkflowSchemeRepository;
 import net.innoventa.tessera.security.Permissions;
+import net.innoventa.tessera.security.access.LocalAuthorizationMirror;
+import net.innoventa.tessera.security.access.ProjectAccess;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -49,18 +51,19 @@ public class ProjectService {
     private static final String DEFAULT_ISSUE_TYPE_SCHEME_ID = "scheme-issue-type-default";
     private static final String DEFAULT_WORKFLOW_SCHEME_ID = "scheme-workflow-default";
 
-    private final ProjectRepository projectRepository;
+    private final ProjectRepository           projectRepository;
     private final ProjectMembershipRepository membershipRepository;
-    private final ProjectRoleRepository projectRoleRepository;
-    private final IssueTypeSchemeRepository issueTypeSchemeRepository;
-    private final WorkflowSchemeRepository workflowSchemeRepository;
-    private final MemberRepository memberRepository;
-    private final BoardRepository boardRepository;
-    private final MemberService memberService;
-    private final ProjectPermissionService projectPermissionService;
-    private final IssueKeyAllocator issueKeyAllocator;
-    private final BoardProvisioner boardProvisioner;
-    private final Supplier<String> idGenerator;
+    private final ProjectRoleRepository       projectRoleRepository;
+    private final IssueTypeSchemeRepository   issueTypeSchemeRepository;
+    private final WorkflowSchemeRepository    workflowSchemeRepository;
+    private final MemberRepository            memberRepository;
+    private final BoardRepository             boardRepository;
+    private final MemberService               memberService;
+    private final IssueKeyAllocator           issueKeyAllocator;
+    private final BoardProvisioner            boardProvisioner;
+    private final ProjectAccess               projectAccess;
+    private final LocalAuthorizationMirror    grants;
+    private final Supplier<String>            idGenerator;
 
     @Transactional
     public ProjectResponse create(Jwt jwt, CreateProjectRequest request) {
@@ -101,13 +104,32 @@ public class ProjectService {
             .roleId(administrator.getId())
             .build());
 
-        return toResponse(project, creator.getId());
+        // ⚠️ The grant that actually decides anything. Without this line the creator would own a project
+        // they cannot open: `@RequiresAccess` resolves from the engine's rows, and a membership row is
+        // no longer one of them.
+        grants.assignRole(
+            creator.getId(), project.getId(), ADMINISTRATOR_ROLE_NAME, creator.getId());
+
+        return toResponse(project, creator);
     }
 
     @Transactional(readOnly = true)
     public List<ProjectResponse> list(Jwt jwt) {
-        Member member = memberService.resolveMember(jwt);
+        return list(memberService.resolveMember(jwt));
+    }
 
+    /**
+     * The same, for a caller that is not an HTTP request.
+     *
+     * <p>⚠️ <strong>The overload exists because the {@code Jwt} was never the question.</strong> Every
+     * method here opened by turning one into a {@link Member} and then never looking at it again — so
+     * the signature said "this is reachable from a controller and nowhere else", which was true by
+     * accident rather than on purpose. A tool handler has a person's identifier and no token; so would
+     * a scheduled job, an import, or a test. This is the shape underneath, and the {@code Jwt} version
+     * is now the two-line adapter it always was.
+     */
+    @Transactional(readOnly = true)
+    public List<ProjectResponse> list(Member member) {
         List<String> projectIds = membershipRepository.findByMemberId(member.getId()).stream()
             .map(ProjectMembership::getProjectId)
             .distinct()
@@ -118,7 +140,7 @@ public class ProjectService {
         }
 
         return projectRepository.findByIdInOrderByKeyAsc(projectIds).stream()
-            .map(project -> toResponse(project, member.getId()))
+            .map(project -> toResponse(project, member))
             .toList();
     }
 
@@ -126,26 +148,23 @@ public class ProjectService {
     public ProjectResponse get(Jwt jwt, String projectId) {
         Member member = memberService.resolveMember(jwt);
 
-        // Visibility is membership-based: a non-member does not see the project at all (ADR-0002).
-        if (!projectPermissionService.isMember(member.getId(), projectId)) {
-            throw new ResourceNotFoundException("Project not found: " + projectId);
-        }
-
-        return toResponse(requireProject(projectId), member.getId());
+        // ⚠️ ADR-0002's isolation is the permission axis's now: a caller who holds nothing at this project
+        // is refused with NOT_FOUND_OR_HIDDEN before this method runs, which is the same 404 the check
+        // that used to be here produced — with nobody having to remember to write it.
+        return toResponse(requireProject(projectId), member);
     }
 
     @Transactional
     public ProjectResponse update(Jwt jwt, String projectId, UpdateProjectRequest request) {
         Member member = memberService.resolveMember(jwt);
         Project project = requireProject(projectId);
-        projectPermissionService.require(member, projectId, Permissions.ADMINISTER_PROJECT);
 
         project.setName(request.name());
         project.setLeadMemberId(memberService.requireMember(request.leadMemberId()).getId());
         project.setIssueTypeSchemeId(requireIssueTypeScheme(request.issueTypeSchemeId()));
         project.setWorkflowSchemeId(requireWorkflowScheme(request.workflowSchemeId()));
 
-        return toResponse(project, member.getId());
+        return toResponse(project, member);
     }
 
     /** The project entity or {@code 404} — shared with the membership-administration service. */
@@ -167,7 +186,7 @@ public class ProjectService {
             .getId();
     }
 
-    private ProjectResponse toResponse(Project project, String currentMemberId) {
+    private ProjectResponse toResponse(Project project, Member caller) {
         MemberSummary lead = memberRepository.findById(project.getLeadMemberId())
             .map(MemberSummary::from)
             .orElse(null);
@@ -180,7 +199,9 @@ public class ProjectService {
             .map(scheme -> new SchemeSummary(scheme.getId(), scheme.getName()))
             .orElse(null);
 
-        List<String> myPermissions = projectPermissionService.effectivePermissions(currentMemberId, project.getId())
+        // ⚠️ What the interface gates on, and NEVER the authority. It exists so the board stops offering
+        // a button the server is about to refuse; every one of these is still checked on the route.
+        List<String> myPermissions = projectAccess.permissionsIn(caller, project.getId())
             .stream()
             .sorted()
             .toList();
