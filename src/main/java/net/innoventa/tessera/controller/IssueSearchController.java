@@ -1,14 +1,22 @@
 package net.innoventa.tessera.controller;
 
+import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import net.innoventa.tessera.dto.issue.IssueReferenceRequest;
+import net.innoventa.tessera.dto.issue.IssueReferenceView;
 import net.innoventa.tessera.dto.issue.IssueSearchResponse;
+import net.innoventa.tessera.service.IssueReferenceService;
 import net.innoventa.tessera.service.IssueSearchService;
 import org.jmouse.access.enforcement.RequiresAccess;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.GetMapping;
+import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestParam;
 import org.springframework.web.bind.annotation.RestController;
+
+import java.util.List;
 
 /**
  * The cross-project issue search (ticket 10) — the one issue read whose scope is the caller rather than
@@ -26,7 +34,29 @@ import org.springframework.web.bind.annotation.RestController;
 @RequiresAccess
 public class IssueSearchController {
 
-    private final IssueSearchService issueSearchService;
+    private final IssueSearchService    issueSearchService;
+    private final IssueReferenceService issueReferenceService;
+
+    /**
+     * Every issue key one document mentions, resolved at once.
+     *
+     * <p>A `TES-42` written in a description or a comment renders as a live link, and this is what makes
+     * it live. Bare {@code @RequiresAccess} for the reason the search above carries one: the request is
+     * not <em>about</em> a project — it is about whatever the reader can see — so there is no place to
+     * be refused at, and what confines the answer is the filtering.
+     *
+     * <p>⚠️ A key in a project the caller holds nothing at simply is not in the answer, exactly as a key
+     * that does not exist is not. Telling the two apart would let anybody enumerate the tracker by
+     * writing keys into a document.
+     */
+    @PostMapping("/api/issues/references")
+    @RequiresAccess
+    public List<IssueReferenceView> references(
+        @AuthenticationPrincipal Jwt jwt,
+        @Valid @RequestBody IssueReferenceRequest request
+    ) {
+        return issueReferenceService.resolve(jwt, request.issueKeys());
+    }
 
     @GetMapping("/api/issues/search")
     public IssueSearchResponse search(

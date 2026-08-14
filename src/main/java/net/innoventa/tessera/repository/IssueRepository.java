@@ -43,6 +43,15 @@ public interface IssueRepository extends JpaRepository<Issue, String> {
 
     Optional<Issue> findByIssueKey(String issueKey);
 
+    /**
+     * Many keys at once — what a document's worth of `TES-42` mentions resolves through.
+     *
+     * <p>⚠️ The caller normalises to uppercase before calling. Keys are stored that way, and MySQL would
+     * match either case while PostgreSQL would not — a difference that would make the same document
+     * render differently on the two databases.
+     */
+    List<Issue> findByIssueKeyIn(List<String> issueKeys);
+
     List<Issue> findByParentIdOrderByRankAsc(String parentId);
 
     boolean existsByParentId(String parentId);
