@@ -94,6 +94,15 @@ public interface IssueRepository extends JpaRepository<Issue, String> {
 
     long countByIssueTypeId(String issueTypeId);
 
+    /**
+     * Issues of a type in a given set of projects — what removing a type from a scheme reports.
+     *
+     * <p>⚠️ Scoped to the projects <em>on the scheme</em> rather than counted installation-wide. The
+     * whole point of the number is "how much work here would stop being creatable", and a Bug in a
+     * project on a different scheme is not affected by this edit at all.
+     */
+    long countByIssueTypeIdAndProjectIdIn(String issueTypeId, Collection<String> projectIds);
+
     long countByPriorityId(String priorityId);
 
     long countByResolutionId(String resolutionId);

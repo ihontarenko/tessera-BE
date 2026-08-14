@@ -15,4 +15,7 @@ public interface ProjectRepository extends JpaRepository<Project, String> {
     /** Which projects a scheme is in force in — the "used by Innoventa, Moneta" panel, and the refusal. */
     List<Project> findByWorkflowSchemeIdInOrderByKeyAsc(Collection<String> workflowSchemeIds);
 
+    /** The same question of the other scheme kind — see {@code ConfigurationUsage}. */
+    List<Project> findByIssueTypeSchemeIdInOrderByKeyAsc(Collection<String> issueTypeSchemeIds);
+
 }

@@ -24,6 +24,7 @@ import net.innoventa.tessera.security.Roles;
 import net.innoventa.tessera.security.access.Targets;
 import org.jmouse.access.jpa.AccessAdministration;
 import net.innoventa.tessera.security.access.ProjectAccess;
+import net.innoventa.tessera.service.configuration.InstanceDefaults;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
@@ -37,18 +38,20 @@ import java.util.function.Supplier;
  * projects they belong to); editing requires {@code ADMINISTER_PROJECT}.
  * <p>
  * Creation used to resolve its schemes through a type -> preset table. With the project type gone
- * (ADR-0015) there is nothing to key that lookup on, so the defaults are simply named here. Both are
- * ordinary schemes a project may change afterwards through {@link #update}; naming them is a starting
- * point, not a classification. The lighter {@code scheme-issue-type-todo} / {@code workflow-todo} pair
- * survives in the catalog and is reachable the same way.
+ * (ADR-0015) there is nothing to key that lookup on, so the two defaults are a stored setting —
+ * {@link InstanceDefaults} — rather than a classification. Both are ordinary schemes a project may
+ * change afterwards through {@link #update}; the setting is a starting point, nothing more.
+ *
+ * <p>⚠️ <strong>They were string constants in this file until ticket 06.</strong> That was fine while
+ * schemes were seeded and read-only, and stopped being fine the moment a screen could delete one: a
+ * constant pointing at a deleted row breaks project creation, and the break arrives at whoever next
+ * creates a project rather than at the click that caused it.
  */
 @Service
 @RequiredArgsConstructor
 public class ProjectService {
 
     private static final String DEFAULT_KEY_STRATEGY = "PREFIXED_SEQUENCE";
-    private static final String DEFAULT_ISSUE_TYPE_SCHEME_ID = "scheme-issue-type-default";
-    private static final String DEFAULT_WORKFLOW_SCHEME_ID = "scheme-workflow-default";
 
     private final ProjectRepository           projectRepository;
 
@@ -61,6 +64,7 @@ public class ProjectService {
     private final IssueKeyAllocator           issueKeyAllocator;
     private final BoardProvisioner            boardProvisioner;
     private final ProjectAccess               projectAccess;
+    private final InstanceDefaults            instanceDefaults;
     private final AccessAdministration        access;
     private final Supplier<String>            idGenerator;
 
@@ -86,8 +90,11 @@ public class ProjectService {
             .key(request.key())
             .name(request.name())
             .leadMemberId(leadMemberId)
-            .issueTypeSchemeId(requireIssueTypeScheme(DEFAULT_ISSUE_TYPE_SCHEME_ID))
-            .workflowSchemeId(requireWorkflowScheme(DEFAULT_WORKFLOW_SCHEME_ID))
+            // ⚠️ Read from the settings row, not named here. Schemes are editable and deletable now
+            // (ticket 06), and a constant naming one is a way to break project creation from the
+            // configuration screen — with the break arriving at whoever next creates a project.
+            .issueTypeSchemeId(requireIssueTypeScheme(instanceDefaults.issueTypeSchemeId()))
+            .workflowSchemeId(requireWorkflowScheme(instanceDefaults.workflowSchemeId()))
             .keyStrategy(DEFAULT_KEY_STRATEGY)
             .build());
 

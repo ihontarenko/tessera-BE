@@ -10,6 +10,8 @@ import net.innoventa.tessera.domain.WorkflowScheme;
 import net.innoventa.tessera.domain.WorkflowSchemeItem;
 import net.innoventa.tessera.dto.configuration.ConfigurationUsageReport;
 import net.innoventa.tessera.dto.configuration.ConfigurationUsageReport.Holder;
+import net.innoventa.tessera.dto.configuration.ProjectReference;
+import net.innoventa.tessera.dto.configuration.SchemeUsageReport;
 import net.innoventa.tessera.repository.BoardColumnStatusRepository;
 import net.innoventa.tessera.repository.CountByKey;
 import net.innoventa.tessera.repository.IssueLinkRepository;
@@ -26,10 +28,12 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.ArrayList;
 import java.util.Comparator;
+import java.util.LinkedHashMap;
 import java.util.LinkedHashSet;
 import java.util.List;
 import java.util.Map;
 import java.util.Set;
+import java.util.function.Function;
 import java.util.stream.Collectors;
 
 /**
@@ -67,6 +71,7 @@ public class ConfigurationUsage {
     private final IssueTypeSchemeRepository     issueTypeSchemeRepository;
     private final IssueTypeSchemeItemRepository issueTypeSchemeItemRepository;
     private final ProjectRepository             projectRepository;
+    private final InstanceDefaults              instanceDefaults;
 
     // ── The flat catalogs ─────────────────────────────────────────────────────
 
@@ -207,6 +212,75 @@ public class ConfigurationUsage {
             : projectRepository.findByWorkflowSchemeIdInOrderByKeyAsc(schemeIds);
     }
 
+    // ── Schemes ───────────────────────────────────────────────────────────────
+
+    /**
+     * A scheme is held by the projects on it, and by being an instance default.
+     *
+     * <p>⚠️ <strong>The second holder is not a foreign key anybody would notice.</strong> A scheme with
+     * no projects on it looks free, and deleting it succeeds right up until the next person creates a
+     * project — which is exactly the failure mode {@code InstanceSettings} exists to end, so it is
+     * reported as loudly as a project is.
+     */
+    public ConfigurationUsageReport ofIssueTypeScheme(String schemeId) {
+        List<Project> projects = projectsOnIssueTypeScheme(schemeId);
+
+        return report(
+            projectsHolding(projects),
+            instanceDefaults.isDefaultIssueTypeScheme(schemeId)
+                ? Holder.of("instanceDefault", 1, "the issue-type scheme new projects start on")
+                : null);
+    }
+
+    public ConfigurationUsageReport ofWorkflowScheme(String schemeId) {
+        List<Project> projects = projectsOnWorkflowScheme(schemeId);
+
+        return report(
+            projectsHolding(projects),
+            instanceDefaults.isDefaultWorkflowScheme(schemeId)
+                ? Holder.of("instanceDefault", 1, "the workflow scheme new projects start on")
+                : null);
+    }
+
+    public List<Project> projectsOnIssueTypeScheme(String schemeId) {
+        return projectRepository.findByIssueTypeSchemeIdInOrderByKeyAsc(List.of(schemeId));
+    }
+
+    public List<Project> projectsOnWorkflowScheme(String schemeId) {
+        return projectRepository.findByWorkflowSchemeIdInOrderByKeyAsc(List.of(schemeId));
+    }
+
+    /**
+     * Every project on every scheme of both kinds, in one pass over the projects.
+     *
+     * <p>A project names both of its schemes, so grouping the whole table twice answers the entire
+     * screen — where a query per scheme would ask the same table a dozen times for the same rows.
+     */
+    public SchemeUsageReport schemeUsage() {
+        List<Project> projects = projectRepository.findAll();
+
+        return new SchemeUsageReport(
+            groupBy(projects, Project::getIssueTypeSchemeId),
+            groupBy(projects, Project::getWorkflowSchemeId),
+            instanceDefaults.issueTypeSchemeId(),
+            instanceDefaults.workflowSchemeId());
+    }
+
+    /**
+     * How many issues of a type live in the projects on a scheme — what removing that type reports.
+     *
+     * <p>⚠️ <strong>Reported, never refused.</strong> Those issues keep their type and stay perfectly
+     * readable; what stops is raising new ones, because ticket 03 of the IA cluster enforces the scheme
+     * at creation. Refusing the removal would make a scheme impossible to narrow once anybody had used
+     * it, which is the opposite of what an editable scheme is for.
+     */
+    public long issuesOfTypeOnIssueTypeScheme(String schemeId, String issueTypeId) {
+        List<String> projectIds = projectsOnIssueTypeScheme(schemeId).stream().map(Project::getId).toList();
+
+        return projectIds.isEmpty() ? 0L
+            : issueRepository.countByIssueTypeIdAndProjectIdIn(issueTypeId, projectIds);
+    }
+
     // ── Bulk, for the Administration screen ───────────────────────────────────
 
     /**
@@ -250,6 +324,33 @@ public class ConfigurationUsage {
      * is not one: those projects hold the row only by way of their issues, and listing them separately
      * would read as two independent reasons deletion is refused.
      */
+    /** "3 projects — OPS, WEB, INT", or nothing at all where a scheme is on none. */
+    private Holder projectsHolding(List<Project> projects) {
+        if (projects.isEmpty()) {
+            return null;
+        }
+
+        return new Holder(
+            "projects", projects.size(),
+            projects.size() + " " + plural("project", projects.size()),
+            names(projects.stream().map(Project::getKey).toList()));
+    }
+
+    private static Map<String, List<ProjectReference>> groupBy(
+        List<Project> projects, Function<Project, String> schemeId) {
+
+        return projects.stream()
+            .sorted(Comparator.comparing(Project::getKey))
+            .collect(Collectors.groupingBy(
+                schemeId,
+                LinkedHashMap::new,
+                Collectors.mapping(ConfigurationUsage::reference, Collectors.toList())));
+    }
+
+    private static ProjectReference reference(Project project) {
+        return new ProjectReference(project.getId(), project.getKey(), project.getName());
+    }
+
     private Holder issuesHolding(long issues, long projects) {
         if (issues == 0) {
             return null;
