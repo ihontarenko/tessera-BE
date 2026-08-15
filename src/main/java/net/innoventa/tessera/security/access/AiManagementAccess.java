@@ -3,6 +3,7 @@ package net.innoventa.tessera.security.access;
 import net.innoventa.tessera.security.Permissions;
 import org.jmouse.access.enforcement.ExternalAccessRules;
 import org.jmouse.access.enforcement.ExternalAccessRules.Declaration;
+import org.jmouse.ai.management.AgentAdministrationController;
 import org.jmouse.ai.management.OverviewController;
 import org.jmouse.ai.management.ProviderAdministrationController;
 import org.jmouse.ai.management.ProviderController;
@@ -56,6 +57,11 @@ public class AiManagementAccess {
                 // which keys exist and where they point, which belongs with the power to change them
                 // rather than with the power to watch what the tools did.
                 .type(ProviderAdministrationController.class, administering)
+                // ⚠️ Administering too, and the whole type for the same reason. Its reads disclose every
+                // agent in the installation, who owns each and which clients hold a credential — and its
+                // writes switch an agent off or end somebody's client mid-session. Neither belongs with
+                // the power to watch what the tools did.
+                .type(AgentAdministrationController.class, administering)
                 .build();
     }
 }

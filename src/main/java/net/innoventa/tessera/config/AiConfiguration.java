@@ -27,6 +27,7 @@ import org.jmouse.ai.jpa.JpaProviderAdministration;
 import org.jmouse.ai.jpa.JpaProviderSettingsSource;
 import org.jmouse.ai.jpa.migration.AiDialect;
 import org.jmouse.ai.jpa.migration.AiMigrations;
+import org.jmouse.ai.management.AgentAdministrationController;
 import org.jmouse.ai.management.OverviewController;
 import org.jmouse.ai.management.ProviderAdministrationController;
 import org.jmouse.ai.management.ProviderController;
@@ -387,6 +388,21 @@ public class AiConfiguration {
             ProviderRegistry providers, ToolCatalogView tools, ToolCallHistory history) {
 
         return new OverviewController(providers, tools, history);
+    }
+
+    /**
+     * Every agent and the clients connected to it, on the same screen as everything else here.
+     *
+     * <p>The controller is the library's and reads the two ports above it, so a product storing agents
+     * a different way gets this screen over its own arrangement without a line of it changing. ⚠️ Gated
+     * by {@code AiManagementAccess} at {@code ai:administer} — its reads disclose every agent in the
+     * installation and its writes end somebody's client mid-session.
+     */
+    @Bean
+    public AgentAdministrationController aiAgentAdministrationController(
+            AgentDirectory agents, AgentConnections connections) {
+
+        return new AgentAdministrationController(agents, connections);
     }
 
     @Bean
