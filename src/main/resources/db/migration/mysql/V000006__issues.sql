@@ -206,6 +206,18 @@ CREATE TABLE comments
     issue_id          VARCHAR(36)   NOT NULL,
     author_member_id  VARCHAR(36)   NOT NULL,
     body              VARCHAR(4000) NOT NULL,
+
+    -- Which agent wrote it, where one did. NULL for a person at the keyboard.
+    --
+    -- ⚠️ NO FOREIGN KEY, AND THE NAME IS COPIED IN. Provenance has to outlive what
+    -- it names: an agent discarded next year must not take "who wrote this" away
+    -- with it, and must not become undeletable either. The identifier still links
+    -- while the agent exists; the name is the snapshot that survives it. Same
+    -- reasoning an audit actor already uses, and it sidesteps a foreign key across
+    -- two Flyway histories into the bargain.
+    agent_id          VARCHAR(36),
+    agent_name        VARCHAR(128),
+
     created_at        TIMESTAMP     NOT NULL,
     updated_at        TIMESTAMP     NOT NULL,
 
@@ -225,6 +237,12 @@ CREATE TABLE activity_logs
     id               VARCHAR(36) NOT NULL,
     issue_id         VARCHAR(36) NOT NULL,
     actor_member_id  VARCHAR(36) NOT NULL,
+
+    -- Which agent did it, where one did. NULL for a person at the keyboard.
+    -- ⚠️ No foreign key, name copied in — see the comments table above for why.
+    agent_id         VARCHAR(36),
+    agent_name       VARCHAR(128),
+
     created_at       TIMESTAMP   NOT NULL,
 
     CONSTRAINT activity_logs_pk       PRIMARY KEY (id),

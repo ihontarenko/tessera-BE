@@ -58,17 +58,17 @@ public class McpConsentController {
         return new ConnectionInfoResponse(settings.apiUrl(McpEndpoint.PATH));
     }
 
-    /** The connections this person has approved, newest first. */
+    /** The connections this person has approved, newest first, each with the agent it belongs to. */
     @GetMapping("/connections")
     public List<ConnectionResponse> connections(@AuthenticationPrincipal Jwt token) {
         return credentialService.connectionsOf(memberService.resolveMember(token).getId()).stream()
-                .map(ConnectionResponse::from)
+                .map(acting -> ConnectionResponse.from(acting.connection(), acting.agent()))
                 .toList();
     }
 
     /** Ends one of them. Immediate: an access token naming it stops being honoured on its next call. */
-    @DeleteMapping("/connections/{credentialId}")
-    public void revoke(@PathVariable String credentialId, @AuthenticationPrincipal Jwt token) {
-        credentialService.revoke(credentialId, memberService.resolveMember(token).getId());
+    @DeleteMapping("/connections/{connectionId}")
+    public void revoke(@PathVariable String connectionId, @AuthenticationPrincipal Jwt token) {
+        credentialService.revoke(connectionId, memberService.resolveMember(token).getId());
     }
 }

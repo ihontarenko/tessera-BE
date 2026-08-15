@@ -51,7 +51,20 @@ public class ProjectAccess {
     }
 
     public boolean holds(Member member, String projectId, String permission) {
-        return resolve(subjectOf(member), projectId).contains(permission);
+        return holds(subjectOf(member), projectId, permission);
+    }
+
+    /**
+     * The same question about a subject that is not simply a member.
+     *
+     * <p>⚠️ <strong>This overload exists for agents, and taking a {@code Member} instead is the bug it
+     * prevents.</strong> An agent restricted to its own grants is a <em>service sub-account</em> to the
+     * engine — its set is capped by its owner's in every scope — and that fact lives on the
+     * {@link Subject}, nowhere else. Handing this the owner's member row would resolve the owner's
+     * permissions and quietly ignore the ceiling, which is a restriction somebody set having no effect.
+     */
+    public boolean holds(Subject subject, String projectId, String permission) {
+        return resolve(subject, projectId).contains(permission);
     }
 
     /**
@@ -105,7 +118,12 @@ public class ProjectAccess {
      * which of the two an empty answer is.
      */
     public List<String> visibleProjectIds(Member member) {
-        VisibilityScope visible = visibilityScopes.of(subjectOf(member), Permissions.BROWSE_PROJECT);
+        return visibleProjectIds(subjectOf(member));
+    }
+
+    /** The same, for a subject that may be an agent — see {@link #holds(Subject, String, String)}. */
+    public List<String> visibleProjectIds(Subject subject) {
+        VisibilityScope visible = visibilityScopes.of(subject, Permissions.BROWSE_PROJECT);
 
         return visible.places().stream()
                 .filter(place -> TesseraScope.PROJECT.equals(place.type()))

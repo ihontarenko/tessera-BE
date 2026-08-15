@@ -2,6 +2,8 @@ package net.innoventa.tessera.service;
 
 import lombok.RequiredArgsConstructor;
 import net.innoventa.tessera.domain.Comment;
+import net.innoventa.tessera.security.CallingAgent;
+import org.jmouse.ai.agent.Agent;
 import net.innoventa.tessera.domain.Issue;
 import net.innoventa.tessera.domain.Member;
 import net.innoventa.tessera.dto.MemberSummary;
@@ -37,6 +39,7 @@ public class CommentService {
     private final ProjectAccess projectAccess;
     private final MemberService memberService;
     private final Supplier<String> idGenerator;
+    private final CallingAgent callingAgent;
 
     @Transactional(readOnly = true)
     public List<CommentResponse> list(Jwt jwt, String issueId) {
@@ -58,11 +61,18 @@ public class CommentService {
     public CommentResponse add(Member caller, String issueId, SaveCommentRequest request) {
         Issue issue = requireIssue(issueId);
 
+        // ⚠️ Stamped on creation and never on edit. The agent that wrote a comment is a fact about the
+        // writing; a person correcting a typo afterwards has not made it theirs, and an edit re-stamping
+        // it would erase the one thing the badge exists to say.
+        Agent agent = callingAgent.current().orElse(null);
+
         Comment comment = commentRepository.save(Comment.builder()
             .id(idGenerator.get())
             .issueId(issueId)
             .authorMemberId(caller.getId())
             .body(request.body())
+            .agentId(agent == null ? null : agent.id())
+            .agentName(agent == null ? null : agent.name())
             .build());
 
         return toResponse(comment, caller, issue.getProjectId());
@@ -110,6 +120,7 @@ public class CommentService {
         return new CommentResponse(
             comment.getId(),
             author,
+            comment.getAgentName(),
             comment.getBody(),
             isAuthor || isAdministrator,
             comment.getCreatedAt(),

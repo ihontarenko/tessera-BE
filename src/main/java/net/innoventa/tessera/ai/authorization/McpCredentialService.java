@@ -2,10 +2,15 @@ package net.innoventa.tessera.ai.authorization;
 
 import lombok.RequiredArgsConstructor;
 import lombok.extern.slf4j.Slf4j;
-import net.innoventa.tessera.domain.McpCredential;
 import net.innoventa.tessera.domain.Member;
 import net.innoventa.tessera.exception.ResourceNotFoundException;
-import net.innoventa.tessera.repository.McpCredentialRepository;
+import net.innoventa.tessera.repository.MemberRepository;
+import org.jmouse.ai.agent.Agent;
+import org.jmouse.ai.agent.AgentAdmission;
+import org.jmouse.ai.agent.AgentAuthority;
+import org.jmouse.ai.agent.AgentConnection;
+import org.jmouse.ai.agent.AgentConnections;
+import org.jmouse.ai.agent.AgentDirectory;
 import org.jmouse.ai.mcp.authorization.AuthorizationRoutes;
 import org.jmouse.ai.mcp.authorization.McpAuthorizationException;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
@@ -14,19 +19,14 @@ import org.springframework.security.oauth2.jwt.JwtClaimsSet;
 import org.springframework.security.oauth2.jwt.JwtEncoder;
 import org.springframework.security.oauth2.jwt.JwtEncoderParameters;
 import org.springframework.stereotype.Service;
-import org.springframework.transaction.annotation.Transactional;
 
-import java.nio.charset.StandardCharsets;
-import java.security.MessageDigest;
-import java.security.NoSuchAlgorithmException;
 import java.security.SecureRandom;
 import java.time.Duration;
 import java.time.Instant;
-import java.time.LocalDateTime;
 import java.util.Base64;
-import java.util.HexFormat;
+import java.util.Comparator;
 import java.util.List;
-import java.util.function.Supplier;
+import java.util.Optional;
 
 /**
  * The one place a credential that reaches {@code /api/mcp} is minted, renewed, or ended.
@@ -35,36 +35,56 @@ import java.util.function.Supplier;
  *
  * <p>Identity mints every token a browser uses, and nothing about that changes. What it cannot mint is a
  * credential <em>confined to one endpoint</em>: an audience is a service, not a route, so a token good
- * for the protocol would equally be good for every REST call — the gap {@code McpConfiguration} has
- * named since the protocol was first served here. So a protocol credential is Tessera's own, signed with
- * a secret only Tessera holds.
+ * for the protocol would equally be good for every REST call. So a protocol credential is Tessera's own,
+ * signed with a secret only Tessera holds. The protocol filter chain validates HS256 against that
+ * secret; every other route validates RS256 against Identity's JWKS. Neither decoder can be made to
+ * accept the other's token, so <em>"this credential works nowhere else"</em> is a signature that does not
+ * verify rather than a check somebody could forget to write.
  *
- * <p><strong>The confinement is cryptographic rather than declared.</strong> The protocol filter chain
- * validates HS256 against that secret; every other route validates RS256 against Identity's JWKS.
- * Neither decoder can be made to accept the other's token, so "this credential works nowhere else" is
- * not a claim checked in a filter somebody could forget to write — it is a signature that does not
- * verify.
+ * <h2>⚠️ What changed: it acts as an AGENT that acts for a person, not as the person</h2>
  *
- * <p><strong>And it acts as a person, not as a robot.</strong> The {@code sub} claim is the approving
- * member's Identity subject, so {@code MemberAuthoritiesConverter}, {@code CurrentMemberSubject} and
- * {@code TesseraCallerResolver} resolve the caller exactly as they do for a browser — the agent can do
- * what that person can do, in the projects that person belongs to, and nothing else. ⚠️ Which is why
- * {@code name} and {@code email} are copied onto the token: {@code MemberService.resolveMember} refreshes
- * a member's cached claims from whatever token arrives, so a token without them would quietly rename the
- * person to their own subject identifier.
+ * <p>It used to act as the person outright, and the cost was that nothing could say afterwards that an
+ * agent had been involved: a comment written through the protocol was indistinguishable from one typed
+ * into the browser, there was nothing to grant a narrower permission to, and there was nothing to switch
+ * off short of ending every connection.
  *
- * <p>⚠️ <strong>A self-contained token cannot be taken back, so it names its row.</strong> The {@code cid}
- * claim is the {@link McpCredential} it was issued against, checked live on every call by
- * {@link #isHonoured}. Without it, revoking a connection would mean waiting out the access token — with
- * it, revoking is immediate and the token becomes a string.
+ * <p>So the rows are {@code jmouse-ai}'s two now — an {@link Agent} is the persona, an
+ * {@link AgentConnection} is one client holding a credential for it, and one agent has many. What that
+ * buys, in the order somebody notices it:
+ *
+ * <ul>
+ *   <li>Every record made through the protocol can name the agent that made it.
+ *   <li>An agent can be switched off, or narrowed to less than its owner holds, without ending
+ *       connections — {@link AgentAuthority}.
+ *   <li>Two clients of the same person are two connections under one persona, so revoking a laptop does
+ *       not sign out a desktop.
+ * </ul>
+ *
+ * <p><strong>A new agent is {@link AgentAuthority#INHERITED}</strong>, which is exactly the previous
+ * behaviour: it can do what its owner could have done by hand, and follows them into new projects with
+ * nothing to go stale. Narrowing it is then an act somebody takes, rather than the default that silently
+ * refuses every call.
+ *
+ * <p>⚠️ <strong>The {@code sub} claim is still the member's Identity subject</strong>, so
+ * {@code MemberAuthoritiesConverter} and {@code CurrentMemberSubject} resolve a browser and a protocol
+ * caller identically. {@code name} and {@code email} are copied on for the same reason as before —
+ * {@code MemberService.resolveMember} refreshes a member's cached claims from whatever token arrives, and
+ * a token without them would quietly rename the person to their own subject identifier.
+ *
+ * <p>⚠️ <strong>A self-contained token cannot be taken back, so it names both rows.</strong> {@code cid}
+ * is the connection and {@code aid} is the agent, checked live on every call by {@link #admit}. Without
+ * them, revoking would mean waiting out the access token.
  */
 @Service
 @RequiredArgsConstructor
 @Slf4j
 public class McpCredentialService {
 
-    /** Names the row an access token was issued against, so revocation can reach it. */
+    /** Names the connection an access token was issued against, so revocation can reach it. */
     public static final String CREDENTIAL_CLAIM = "cid";
+
+    /** And the agent it acts as, so provenance and the ceiling do not cost a second lookup. */
+    public static final String AGENT_CLAIM = "aid";
 
     /** What the credential is for, in the one word the discovery documents also publish. */
     public static final String SCOPE_CLAIM = "scope";
@@ -85,38 +105,44 @@ public class McpCredentialService {
      */
     private static final Duration USAGE_STAMP_INTERVAL = Duration.ofMinutes(5);
 
-    private final McpCredentialRepository    credentials;
-    private final JwtEncoder                 mcpTokenEncoder;
-    private final McpAuthorizationSettings   settings;
-    private final Supplier<String>           idGenerator;
+    private final AgentDirectory           agents;
+    private final MemberRepository         members;
+    private final AgentConnections         connections;
+    private final JwtEncoder               mcpTokenEncoder;
+    private final McpAuthorizationSettings settings;
 
     /**
      * A credential pair, as the token endpoint answers it.
      *
-     * @param accessToken   the confined JWT a client presents on every protocol call
-     * @param refreshToken  ⚠️ returned once and never recoverable — only its digest is stored
-     * @param expiresIn     the access token's remaining life, in seconds, as OAuth reports it
+     * @param refreshToken ⚠️ returned once and never recoverable — only its digest is stored
      */
     public record IssuedCredential(String accessToken, String refreshToken, long expiresIn) {
     }
 
-    /** Records a new connection for a person and answers with the pair it is worth. */
-    @Transactional
+    /** An agent and the connection a call arrived over — the pair every check here needs. */
+    public record ActingAgent(Agent agent, AgentConnection connection) {
+    }
+
+    /**
+     * Records a new connection for a person and answers with the pair it is worth.
+     *
+     * <p>⚠️ <strong>The agent is found before it is created</strong>, keyed on the client's own name. A
+     * person reconnecting the same client twice gets a second connection under the persona they already
+     * have — not a second "Claude Code" beside the first, which would split the permissions somebody set
+     * and give them two switches where they wanted one.
+     */
     public IssuedCredential issueFor(Member member, String clientName) {
+        Agent  agent        = agentFor(member, clientName);
         String refreshToken = randomRefreshToken();
 
-        McpCredential credential = credentials.save(McpCredential.builder()
-                .id(idGenerator.get())
-                .member(member)
-                .clientName(clientName)
-                .refreshTokenHash(digestOf(refreshToken))
-                .refreshExpiresAt(LocalDateTime.now().plus(settings.refreshTokenLifetime()))
-                .build());
+        AgentConnection connection = connections.open(
+                agent.id(), clientName, refreshToken, Instant.now().plus(settings.refreshTokenLifetime()));
 
-        log.info("Issued MCP credential {} to '{}' acting as member {}",
-                credential.getId(), clientName, member.getId());
+        log.info("Opened MCP connection {} for agent {} ('{}') acting for member {}",
+                connection.id(), agent.id(), agent.name(), member.getId());
 
-        return new IssuedCredential(accessTokenFor(credential), refreshToken, expiresInSeconds());
+        return new IssuedCredential(
+                accessTokenFor(member, agent, connection), refreshToken, expiresInSeconds());
     }
 
     /**
@@ -127,79 +153,151 @@ public class McpCredentialService {
      * end a connection somebody uses daily, on a date nobody chose. The consequence to know is that a
      * refresh token spent twice fails the second time — which is what makes a stolen one visible.
      */
-    @Transactional
     public IssuedCredential renew(String presentedRefreshToken) {
         if (presentedRefreshToken == null || presentedRefreshToken.isBlank()) {
             throw new McpAuthorizationException("A refresh_token is required to renew a credential.");
         }
 
-        McpCredential credential = credentials.findByRefreshTokenHash(digestOf(presentedRefreshToken))
-                .filter(candidate -> candidate.canBeRenewed(LocalDateTime.now()))
+        AgentConnection presented = connections.byRefreshToken(presentedRefreshToken)
                 .orElseThrow(() -> new McpAuthorizationException(
-                        "This refresh token is unknown, already replaced, expired or revoked. Authorize "
-                      + "again to reconnect."));
+                        "This refresh token is unknown or has already been replaced. Authorize again to "
+                      + "reconnect."));
+
+        Agent agent = agents.find(presented.agentId()).orElse(null);
+
+        // The same four-part question the protocol filter asks on every call, asked here too: an
+        // approval and a renewal are different requests, and a connection ended in between must not
+        // hand out a fresh month of access.
+        AgentAdmission.refusalFor(agent, presented, Instant.now()).ifPresent(refusal -> {
+            throw new McpAuthorizationException(refusal);
+        });
+
+        // ⚠️ The owner is read off the agent rather than carried in. A renewal arrives with nothing but
+        // a refresh token — there is no session behind it and no caller to ask — so the only party who
+        // knows whose credential this is, is the row.
+        Member member = members.findById(agent.ownerReference())
+                .orElseThrow(() -> new McpAuthorizationException(
+                        "The member this connection acts for no longer exists. Nothing was changed."));
 
         String replacement = randomRefreshToken();
 
-        credential.setRefreshTokenHash(digestOf(replacement));
-        credential.setRefreshExpiresAt(LocalDateTime.now().plus(settings.refreshTokenLifetime()));
-        credential.setLastUsedAt(LocalDateTime.now());
+        AgentConnection renewed = connections.rotate(
+                presented.id(), replacement, Instant.now().plus(settings.refreshTokenLifetime()));
 
-        return new IssuedCredential(accessTokenFor(credential), replacement, expiresInSeconds());
+        return new IssuedCredential(
+                accessTokenFor(member, agent, renewed), replacement, expiresInSeconds());
     }
 
-    /** Every connection a person holds, newest first. */
-    @Transactional(readOnly = true)
-    public List<McpCredential> connectionsOf(String memberId) {
-        return credentials.findAllByMemberIdOrderByIssuedAtDesc(memberId);
+    /**
+     * Whether a call presenting these two identifiers may proceed, and why not where it may not.
+     *
+     * <p>⚠️ <strong>Four rows, four sentences, one library decision.</strong> The agent can be gone, the
+     * agent can be switched off, the connection can be revoked, and the connection can have expired —
+     * and {@link AgentAdmission} is where those are decided so that this product and the next refuse
+     * identically. Answering with the sentence rather than an exception is what lets the protocol filter
+     * render an OAuth error while a tool call renders a refusal.
+     */
+    public Optional<String> admit(String agentId, String connectionId) {
+        Agent           agent      = agents.find(agentId).orElse(null);
+        AgentConnection connection = connections.find(connectionId).orElse(null);
+
+        if (connection == null) {
+            return Optional.of("The connection this credential belongs to no longer exists. Authorize "
+                             + "the client again to reconnect.");
+        }
+
+        return AgentAdmission.refusalFor(agent, connection, Instant.now());
+    }
+
+    /** The agent and connection behind a call, for whoever needs the rows rather than a verdict. */
+    public Optional<ActingAgent> actingAgent(String agentId, String connectionId) {
+        return agents.find(agentId).flatMap(agent -> connections.find(connectionId)
+                .map(connection -> new ActingAgent(agent, connection)));
+    }
+
+    /**
+     * Every connection a person holds, across all of their agents, newest first.
+     *
+     * <p>Paired with its agent rather than listed bare: a connection on its own cannot answer <em>what
+     * may this thing do</em>, and a screen offering a revoke button with no reason to press one is a
+     * screen nobody can act on.
+     */
+    public List<ActingAgent> connectionsOf(String memberId) {
+        return agents.ownedBy(memberId).stream()
+                .flatMap(agent -> connections.of(agent.id()).stream()
+                        .map(connection -> new ActingAgent(agent, connection)))
+                .sorted(Comparator.comparing(
+                        (ActingAgent acting) -> acting.connection().issuedAt()).reversed())
+                .toList();
     }
 
     /**
      * Ends a connection.
      *
-     * <p>Scoped to the member on purpose: a credential id is not a secret, and the person who approved a
-     * connection is the person who may end it.
+     * <p>Scoped to the member on purpose: a connection identifier is not a secret, and the person who
+     * approved a connection is the person who may end it. ⚠️ The ownership check walks connection →
+     * agent → owner, because the connection itself does not know whose it is — that is the agent's fact
+     * and storing it twice is how the two drift.
      */
-    @Transactional
-    public void revoke(String credentialId, String memberId) {
-        McpCredential credential = credentials.findById(credentialId)
-                .filter(candidate -> candidate.getMember().getId().equals(memberId))
+    public void revoke(String connectionId, String memberId) {
+        AgentConnection connection = connections.find(connectionId)
+                .filter(candidate -> isOwnedBy(candidate, memberId))
                 .orElseThrow(() -> new ResourceNotFoundException(
-                        "No connection of yours has the id '" + credentialId + "'"));
+                        "No connection of yours has the id '" + connectionId + "'"));
 
-        if (credential.isRevoked()) {
+        if (connection.isRevoked()) {
             return;
         }
 
-        credential.setRevokedAt(LocalDateTime.now());
-        log.info("Revoked MCP credential {} for member {}", credentialId, memberId);
+        connections.revoke(connectionId);
+        log.info("Revoked MCP connection {} for member {}", connectionId, memberId);
     }
 
     /**
-     * Whether an access token naming this credential is still honoured — asked on every protocol call.
+     * Records that a connection was used, at most once every {@link #USAGE_STAMP_INTERVAL}.
      *
-     * <p>⚠️ <strong>Read-only and outside any transaction of its own</strong>, because it runs while the
-     * request is still being authenticated. It answers on a projection rather than an entity for the same
-     * reason: there is nowhere here to load a lazy association in.
+     * <p>The agent is stamped too, on the same schedule and for a different question: the connection's
+     * stamp answers <em>which of these clients can I safely revoke</em>, and the agent's answers
+     * <em>is this persona still in use at all</em>.
      */
-    @Transactional(readOnly = true)
-    public boolean isHonoured(String credentialId) {
-        return credentialId != null && credentials.existsByIdAndRevokedAtIsNull(credentialId);
-    }
+    public void noteUsage(String agentId, String connectionId) {
+        connections.find(connectionId)
+                .filter(connection -> isStampStale(connection.lastUsedAt()))
+                .ifPresent(connection -> {
+                    Instant now = Instant.now();
 
-    /** Records that a credential was used, at most once every {@link #USAGE_STAMP_INTERVAL}. */
-    @Transactional
-    public void noteUsage(String credentialId) {
-        credentials.findById(credentialId)
-                .filter(credential -> isStampStale(credential.getLastUsedAt()))
-                .ifPresent(credential -> credentials.stampLastUsed(credential.getId(), LocalDateTime.now()));
+                    connections.stampUsed(connectionId, now);
+                    agents.stampActive(agentId, now);
+                });
     }
 
     // ── Internal ──────────────────────────────────────────────────────────────────
 
-    private String accessTokenFor(McpCredential credential) {
-        Member  member = credential.getMember();
-        Instant now    = Instant.now();
+    /**
+     * The persona this client connects under, created on first sight.
+     *
+     * <p>⚠️ <strong>Born {@link AgentAuthority#INHERITED} and enabled</strong>, which is what keeps
+     * connecting a client a one-step act. The alternative — created restricted, and therefore able to do
+     * nothing until somebody grants it something — turns "approve" into "approve, then go and configure
+     * permissions", and the intervening state reads to its owner as a broken connection rather than as a
+     * deliberate one.
+     */
+    private Agent agentFor(Member member, String clientName) {
+        return agents.ownedBy(member.getId()).stream()
+                .filter(candidate -> candidate.name().equals(clientName))
+                .findFirst()
+                .orElseGet(() -> agents.register(new AgentDirectory.Draft(
+                        member.getId(), clientName, AgentAuthority.INHERITED, true)));
+    }
+
+    private boolean isOwnedBy(AgentConnection connection, String memberId) {
+        return agents.find(connection.agentId())
+                .map(agent -> agent.ownerReference().equals(memberId))
+                .orElse(false);
+    }
+
+    private String accessTokenFor(Member member, Agent agent, AgentConnection connection) {
+        Instant now = Instant.now();
 
         JwtClaimsSet.Builder claims = JwtClaimsSet.builder()
                 .issuer(settings.resourceUrl())
@@ -208,8 +306,9 @@ public class McpCredentialService {
                 .issuedAt(now)
                 .expiresAt(now.plus(settings.accessTokenLifetime()))
                 .claim(SCOPE_CLAIM,      AuthorizationRoutes.SCOPE)
-                .claim(CREDENTIAL_CLAIM, credential.getId())
-                .claim(CLIENT_CLAIM,     credential.getClientName());
+                .claim(CREDENTIAL_CLAIM, connection.id())
+                .claim(AGENT_CLAIM,      agent.id())
+                .claim(CLIENT_CLAIM,     connection.clientName());
 
         // ⚠️ Skipped when absent rather than passed through: JwtClaimsSet refuses a null value outright,
         // and a member with no email is ordinary — Identity's subject is not always one. Found by minting
@@ -232,8 +331,8 @@ public class McpCredentialService {
         return settings.accessTokenLifetime().toSeconds();
     }
 
-    private boolean isStampStale(LocalDateTime lastUsedAt) {
-        return lastUsedAt == null || lastUsedAt.isBefore(LocalDateTime.now().minus(USAGE_STAMP_INTERVAL));
+    private boolean isStampStale(Instant lastUsedAt) {
+        return lastUsedAt == null || lastUsedAt.isBefore(Instant.now().minus(USAGE_STAMP_INTERVAL));
     }
 
     private static String randomRefreshToken() {
@@ -241,15 +340,5 @@ public class McpCredentialService {
         RANDOM.nextBytes(bytes);
 
         return Base64.getUrlEncoder().withoutPadding().encodeToString(bytes);
-    }
-
-    private static String digestOf(String token) {
-        try {
-            return HexFormat.of().formatHex(MessageDigest.getInstance("SHA-256")
-                    .digest(token.getBytes(StandardCharsets.UTF_8)));
-
-        } catch (NoSuchAlgorithmException unavailable) {
-            throw new IllegalStateException("SHA-256 is unavailable", unavailable);
-        }
     }
 }

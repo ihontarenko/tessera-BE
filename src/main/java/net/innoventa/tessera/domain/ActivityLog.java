@@ -31,6 +31,23 @@ public class ActivityLog {
     @Column(name = "actor_member_id", nullable = false, length = 36)
     private String actorMemberId;
 
+    /**
+     * Which agent did it, where one did — null for a person at the keyboard.
+     *
+     * <p>⚠️ <strong>Beside the actor, never instead of it.</strong> An agent acts <em>for</em> somebody,
+     * so the change is still theirs and still turns up in everything that asks about them; this is the
+     * second half of the sentence, not a replacement for the first.
+     *
+     * <p>⚠️ <strong>The name is a snapshot and carries no foreign key.</strong> History has to outlive
+     * what it names — an agent discarded next year must not take "who did this" with it, and must not
+     * become undeletable either.
+     */
+    @Column(name = "agent_id", length = 36)
+    private String agentId;
+
+    @Column(name = "agent_name", length = 128)
+    private String agentName;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 

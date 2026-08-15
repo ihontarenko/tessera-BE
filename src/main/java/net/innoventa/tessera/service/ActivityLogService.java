@@ -2,6 +2,8 @@ package net.innoventa.tessera.service;
 
 import lombok.RequiredArgsConstructor;
 import net.innoventa.tessera.domain.ActivityLog;
+import net.innoventa.tessera.security.CallingAgent;
+import org.jmouse.ai.agent.Agent;
 import net.innoventa.tessera.domain.ActivityLogItem;
 import net.innoventa.tessera.repository.ActivityLogItemRepository;
 import net.innoventa.tessera.repository.ActivityLogRepository;
@@ -30,17 +32,27 @@ public class ActivityLogService {
     private final ActivityLogRepository activityLogRepository;
     private final ActivityLogItemRepository activityLogItemRepository;
     private final Supplier<String> idGenerator;
+    private final CallingAgent callingAgent;
 
+    /**
+     * ⚠️ The agent is stamped here rather than passed in by each caller, and that is why every one of the
+     * dozen services recording an event needed no change at all. It is a fact about the request, read
+     * where the request's identity already lives — see {@link CallingAgent} for why that is safe.
+     */
     @Transactional
     public void record(String issueId, String actorMemberId, ChangeSet changeSet) {
         if (changeSet.isEmpty()) {
             return;
         }
 
+        Agent agent = callingAgent.current().orElse(null);
+
         ActivityLog event = activityLogRepository.save(ActivityLog.builder()
             .id(idGenerator.get())
             .issueId(issueId)
             .actorMemberId(actorMemberId)
+            .agentId(agent == null ? null : agent.id())
+            .agentName(agent == null ? null : agent.name())
             .build());
 
         for (FieldChange change : changeSet.changes()) {

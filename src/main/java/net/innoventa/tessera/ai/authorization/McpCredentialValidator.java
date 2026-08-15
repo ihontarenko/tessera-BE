@@ -7,13 +7,16 @@ import org.springframework.security.oauth2.core.OAuth2TokenValidatorResult;
 import org.springframework.security.oauth2.jwt.Jwt;
 
 /**
- * What makes a self-contained credential revocable: every protocol call asks whether the connection it
- * was issued against still exists.
+ * What makes a self-contained credential revocable: every protocol call asks whether the agent and the
+ * connection it was issued against are both still good for it.
  *
  * <p>Without this, ending a connection would mean waiting out the access token — and a credential that
- * cannot be taken back before it expires is one nobody can safely hand out for a month. The claim it reads
- * is {@code cid}; a token without one was not minted here and is refused as such rather than treated as
- * unrevokable.
+ * cannot be taken back before it expires is one nobody can safely hand out for a month.
+ *
+ * <p><strong>Both claims are required, and a token missing either was not minted here.</strong>
+ * {@code cid} names the connection and {@code aid} the agent; the two answer different halves of the same
+ * question — <em>has this client been ended</em> and <em>has this persona been switched off</em> — and a
+ * token carrying only one could be refused for the wrong reason or not at all.
  *
  * <p>⚠️ <strong>It also stamps "last used", which is a write from a validator and deliberate.</strong>
  * This is the one place every protocol call demonstrably passes through, and the alternative — a servlet
@@ -28,21 +31,27 @@ public class McpCredentialValidator implements OAuth2TokenValidator<Jwt> {
 
     @Override
     public OAuth2TokenValidatorResult validate(Jwt token) {
-        String credentialId = token.getClaimAsString(McpCredentialService.CREDENTIAL_CLAIM);
+        String connectionId = token.getClaimAsString(McpCredentialService.CREDENTIAL_CLAIM);
+        String agentId      = token.getClaimAsString(McpCredentialService.AGENT_CLAIM);
 
-        if (credentialId == null || credentialId.isBlank()) {
-            return refuse("This token carries no connection reference, so it was not issued for the "
-                        + "Model Context Protocol endpoint.");
+        if (isBlank(connectionId) || isBlank(agentId)) {
+            return refuse("This token does not name both a connection and an agent, so it was not issued "
+                        + "for the Model Context Protocol endpoint.");
         }
 
-        if (!credentials.isHonoured(credentialId)) {
-            return refuse("The connection this credential belongs to has been ended. Authorize the client "
-                        + "again to reconnect.");
-        }
+        // ⚠️ The refusal sentence is the library's, so this product and the next say the same thing about
+        // a switched-off agent — and so that a new reason to refuse arrives here without an edit.
+        return credentials.admit(agentId, connectionId)
+                .map(McpCredentialValidator::refuse)
+                .orElseGet(() -> {
+                    credentials.noteUsage(agentId, connectionId);
 
-        credentials.noteUsage(credentialId);
+                    return OAuth2TokenValidatorResult.success();
+                });
+    }
 
-        return OAuth2TokenValidatorResult.success();
+    private static boolean isBlank(String claim) {
+        return claim == null || claim.isBlank();
     }
 
     private static OAuth2TokenValidatorResult refuse(String description) {

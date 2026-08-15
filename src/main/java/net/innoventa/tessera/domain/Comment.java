@@ -34,6 +34,22 @@ public class Comment {
     @Column(nullable = false, length = 4000)
     private String body;
 
+    /**
+     * Which agent wrote it, where one did — null for a person at the keyboard.
+     *
+     * <p>⚠️ <strong>Beside the author, never instead of it.</strong> The comment is still the person's:
+     * they asked for it, they are answerable for it, and it belongs in everything that lists their
+     * comments. This says how it got written.
+     *
+     * <p>⚠️ <strong>The name is a snapshot and carries no foreign key</strong> — see
+     * {@link ActivityLog#getAgentName()} for the reasoning, which is the same.
+     */
+    @Column(name = "agent_id", length = 36)
+    private String agentId;
+
+    @Column(name = "agent_name", length = 128)
+    private String agentName;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 

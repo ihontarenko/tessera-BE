@@ -3,9 +3,9 @@ package net.innoventa.tessera.ai;
 import lombok.RequiredArgsConstructor;
 import net.innoventa.tessera.domain.Project;
 import net.innoventa.tessera.security.access.ProjectAccess;
-import net.innoventa.tessera.service.MemberService;
 import net.innoventa.tessera.repository.ProjectRepository;
 import org.jmouse.ai.CallerIdentity;
+import org.jmouse.ai.access.CallerSubjects;
 import org.jmouse.ai.InvocationScope;
 import org.jmouse.ai.RefusalReason;
 import org.jmouse.ai.ToolAction;
@@ -43,6 +43,12 @@ import java.util.stream.Collectors;
  * A caller who holds nothing at a project does not see it here at all — the same answer
  * {@code ProjectService.get} gives, from the same rows, which is what keeps a tool and a route from
  * disagreeing about which projects exist.
+ *
+ * <p>⚠️ <strong>Asked about the caller's {@code Subject}, not about a member row.</strong> An agent
+ * restricted to its own grants has a caller identifier that is <em>not</em> a member at all, so looking
+ * one up would fail outright; and one inheriting its owner's authority must see exactly what the owner
+ * sees. {@link CallerSubjects} answers both, and it is the same translation the authorizer uses — which
+ * is what stops a project being listable here and refused there.
  */
 @Component
 @RequiredArgsConstructor
@@ -53,7 +59,6 @@ public class ProjectScopeResolver implements ScopeResolver {
 
     private final ProjectRepository projectRepository;
     private final ProjectAccess     projectAccess;
-    private final MemberService     members;
 
     @Override
     public InvocationScope resolve(CallerIdentity caller, ToolAction action, String requested) {
@@ -69,7 +74,7 @@ public class ProjectScopeResolver implements ScopeResolver {
     private List<Project> visibleProjects(CallerIdentity caller) {
         // Asked of the grants rather than of a membership table — that table is gone (V000014), and a
         // project reached through a personal grant was never in it to begin with.
-        List<String> projectIds = projectAccess.visibleProjectIds(members.requireMember(caller.callerId()));
+        List<String> projectIds = projectAccess.visibleProjectIds(CallerSubjects.of(caller));
 
         return projectIds.isEmpty() ? List.of() : projectRepository.findByIdInOrderByKeyAsc(projectIds);
     }
