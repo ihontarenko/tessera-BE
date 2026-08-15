@@ -15,6 +15,7 @@ import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Propagation;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.util.Optional;
 import java.util.function.Supplier;
 
 /**
@@ -76,6 +77,26 @@ public class MemberProvisioner {
         }
 
         return member;
+    }
+
+    /**
+     * The row a concurrent first call has just committed, read where it can actually be seen.
+     *
+     * <p>⚠️ <strong>A new transaction, and that is the whole of this method.</strong> MySQL's default
+     * isolation is {@code REPEATABLE READ}: the losing racer's transaction took its snapshot before the
+     * winner committed, so re-reading inside it finds <em>nothing</em> — the row provably exists, the
+     * insert failed <em>because</em> it exists, and the recovery query cannot see it. That is how a
+     * duplicate-key error escapes a catch block written specifically to swallow it, and what it looks
+     * like from outside is a {@code 500} on somebody's first page load with no second attempt to blame.
+     *
+     * <p>Two parallel first requests are not exotic: one screen opening with two queries is enough, which
+     * is exactly how this surfaced. ⚠️ The row comes back <strong>detached</strong> — it belongs to this
+     * transaction, which is over — so it is a set of values to read, not an entity to modify. Every caller
+     * on this path only reads it.
+     */
+    @Transactional(propagation = Propagation.REQUIRES_NEW, readOnly = true)
+    public Optional<Member> findCommitted(String subject) {
+        return memberRepository.findBySubject(subject);
     }
 
     /**

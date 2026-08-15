@@ -113,7 +113,13 @@ public class MemberService {
         } catch (DataIntegrityViolationException concurrentProvision) {
             // Another request provisioned the same subject between our find and our save. The unique
             // constraint on `subject` is the source of truth — fall back to the winner's committed row.
-            return memberRepository.findBySubject(subject)
+            //
+            // ⚠️ READ IN A NEW TRANSACTION, not in this one. Under MySQL's REPEATABLE READ this
+            // transaction's snapshot predates the winner's commit, so `memberRepository.findBySubject`
+            // here answers EMPTY for a row whose very existence is what just failed the insert — and the
+            // exception this catch exists to swallow gets rethrown. Two parallel first requests are all
+            // it takes; one screen opening with two queries is two parallel requests.
+            return memberProvisioner.findCommitted(subject)
                 .orElseThrow(() -> concurrentProvision);
         }
     }

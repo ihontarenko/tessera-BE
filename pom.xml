@@ -246,6 +246,17 @@
             <version>${jmouse.version}</version>
         </dependency>
 
+        <!-- The three protocol endpoints and the consent screen, which used to be written out here.
+             ⚠️ Its endpoints appear only because Tessera declares a CredentialIssuer bean — the module
+             will not map three public routes on somebody who has not said what minting means. What is
+             NOT in it, and stays here, is everything about a credential: McpCredentialService's HS256
+             signing, the cid claim, mcp_credentials and revocation. See TesseraCredentialIssuer. -->
+        <dependency>
+            <groupId>org.jmouse</groupId>
+            <artifactId>jmouse-ai-mcp-authorization</artifactId>
+            <version>${jmouse.version}</version>
+        </dependency>
+
         <!-- The build rule. ⚠️ A handler under /api carrying neither @RequiresAccess nor
              @PublicEndpoint fails the build — which is the only thing that makes "authorization is
              declared where the route is served" true tomorrow as well as today. -->

@@ -103,20 +103,59 @@ tessera:
     # allow-list.
     audience: ${TESSERA_AUDIENCE:tessera}
 
-    # Where a Model Context Protocol client is sent to get a token, and what this server calls itself
-    # when it asks for one. Published at /.well-known/oauth-protected-resource — see
-    # ProtectedResourceMetadataConfiguration for the four steps of the handshake.
+    # What this server calls itself: the address a client reaches this API at. Published at
+    # /.well-known/oauth-protected-resource as both the resource being protected AND the authorization
+    # server that issues credentials for it — Tessera issues the protocol's own, see
+    # SecurityConfiguration for why that stopped being Identity's job.
     #
-    # ⚠️ `issuer` is Identity's base URL and NOT the jwk-set-uri above with its path trimmed. They agree
-    # today and are different facts: a client needs the issuer to discover the authorization endpoints,
-    # and an installation may perfectly well fetch keys from somewhere else.
-    issuer: ${TESSERA_IDENTITY_ISSUER:http://localhost:9090}
+    # ⚠️ IN A DEPLOYMENT THIS IS THE PUBLIC ADDRESS, and it has to match what the client was pointed at
+    # scheme-and-host exactly: a client refuses a resource whose origin differs from the server URL it
+    # was configured with. Behind a reverse proxy that means the proxy must also forward
+    # /.well-known/** to this backend, or discovery is answered with the frontend's HTML.
     resource: ${TESSERA_RESOURCE:http://localhost:8100}
+
+  # The Model Context Protocol's authorization flow — see McpAuthorizationConfiguration.
+  mcp:
+    # ⚠️ UNSET MEANS "GENERATE ONE PER RUN", which is right on a laptop and wrong everywhere else: every
+    # credential dies on restart, and two instances refuse each other's. At least 32 bytes or the
+    # application refuses to start — that failure belongs at boot, not at somebody's first connection.
+    signing-secret: ${TESSERA_MCP_SIGNING_SECRET:}
+
+    access-token-lifetime: ${TESSERA_MCP_ACCESS_TOKEN_LIFETIME:1h}
+    # How long a client may keep renewing before a person approves again.
+    refresh-token-lifetime: ${TESSERA_MCP_REFRESH_TOKEN_LIFETIME:30d}
 
   bootstrap:
     owner: ${TESSERA_BOOTSTRAP_OWNER:SU}
 
 jmouse:
+  # The shared client-authorization flow — registration, authorization, the token endpoint and the
+  # consent screen — served by jmouse-ai-mcp-authorization rather than written out here.
+  mcp:
+    authorization:
+      # What the screen calls this installation, under the "jMouse MCP · Authorization" heading.
+      application-name: Tessera
+
+      # ⚠️ TWO ADDRESSES, AND IN DEVELOPMENT THEY ARE TWO SERVERS. `resource-url` is where a CLIENT
+      # reaches this API and is what the discovery documents publish; `browser-url` is where a PERSON
+      # reaches Tessera, which locally is the Vite dev server on 5050. The consent screen is served on
+      # the browser address — through Vite's /api proxy — because it has to run on the same origin as
+      # the interface to find the session that interface already stored. Building it from the API
+      # address instead lands on a backend that serves no application and finds nothing.
+      resource-url: ${TESSERA_MCP_RESOURCE_URL:${tessera.security.resource:http://localhost:8100}}
+      browser-url: ${TESSERA_BROWSER_BASE_URL:http://localhost:5050}
+
+      # A browser round trip plus a client's callback, and not a second more than that needs.
+      code-lifetime: ${TESSERA_MCP_CODE_LIFETIME:120s}
+
+      consent:
+        # Where oidc-client-ts keeps the signed-in user: one JSON document under a key built from the
+        # issuer and the client identifier. ⚠️ Changing either of those in Tessera/UI changes this key,
+        # and the only symptom is a consent screen that says nobody is signed in.
+        token-storage-key: ${TESSERA_MCP_TOKEN_STORAGE_KEY:oidc.user:http://localhost:9090:tessera-web}
+        token-storage-field: access_token
+        sign-in-route: /
+
   access:
     policy:
       # ⚠️ NO LOCATIONS MEANS THE FEATURE IS OFF — no bean appears at all, the document is never read,

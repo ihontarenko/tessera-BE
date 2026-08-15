@@ -1,9 +1,16 @@
 package net.innoventa.tessera.config;
 
+import jakarta.servlet.http.HttpServletRequest;
+import net.innoventa.tessera.ai.McpEndpoint;
+import org.springframework.beans.factory.annotation.Qualifier;
+import org.jmouse.ai.mcp.authorization.AuthorizationRoutes;
+import org.jmouse.ai.mcp.authorization.server.McpAuthorizationProperties;
 import org.springframework.beans.factory.annotation.Value;
 import org.springframework.boot.security.oauth2.server.resource.autoconfigure.OAuth2ResourceServerProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
+import org.springframework.context.annotation.Primary;
+import org.springframework.core.annotation.Order;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
@@ -40,38 +47,46 @@ public class SecurityConfiguration {
     @Value("${tessera.security.audience:tessera}")
     private String requiredAudience;
 
-    /** Where a client is sent to get a token — Identity's base URL, not this service's. */
-    @Value("${tessera.security.issuer:http://localhost:9090}")
-    private String issuer;
-
     /**
-     * What this server calls itself, which a client echoes back so Identity mints a token for Tessera
-     * and not for something else.
+     * What this server calls itself: the address a client reaches it at, published as the resource it
+     * protects and — since the protocol's credentials are Tessera's own — as the authorization server that
+     * issues them.
      */
     @Value("${tessera.security.resource:http://localhost:8100}")
     private String resource;
 
-    /** The path Spring Security both serves this document at and advertises in its 401. */
-    static final String METADATA_PATH = "/.well-known/oauth-protected-resource";
-
     /**
-     * How a Model Context Protocol client finds out where to get a token.
+     * How a Model Context Protocol client finds out where to get a credential.
      *
      * <ol>
      *   <li>It calls {@code /api/mcp} with no token and gets <strong>401</strong> carrying
      *       {@code WWW-Authenticate: Bearer resource_metadata="…"}. Spring Security emits that on its
      *       own; nothing here arranges it.
      *   <li>It fetches that document — this — and reads {@code authorization_servers}.
-     *   <li>It runs authorization-code with PKCE against <em>Identity</em>, as the {@code tessera-mcp}
-     *       client registered there, with a loopback redirect.
-     *   <li>It comes back with a token whose {@code aud} is {@code tessera}, the only kind
-     *       {@link #jwtDecoder} accepts.
+     *   <li>It fetches <em>that</em> server's metadata, registers itself (RFC 7591), and runs
+     *       authorization-code with PKCE against it, with a loopback redirect.
+     *   <li>It comes back with a credential {@link #mcpSecurityFilterChain}'s decoder accepts and no
+     *       other chain can verify at all.
      * </ol>
      *
-     * <p><strong>Innoventa had to build all of that</strong> — authorization endpoints, a code store,
-     * dynamic client registration, PKCE policy — because Innoventa <em>is</em> its own authorization
-     * server, so both halves are its. Tessera is only the resource half, which is the shape the
-     * protocol's specification assumes. It costs this method.
+     * <h3>⚠️ The authorization server named here is Tessera, and it used to be Identity</h3>
+     *
+     * <p>That was the shape the specification assumes — resource here, tokens there — and it did not
+     * work: <strong>Identity supports no dynamic client registration</strong>, and a protocol client will
+     * not use a client identifier a human configured, because it has nowhere to be told one. Claude Code
+     * refuses at exactly that step with <em>"Incompatible auth server: does not support dynamic client
+     * registration"</em>, having walked every step above successfully. Pre-registering
+     * {@code tessera-mcp} in Identity could not help and the registration is now unused.
+     *
+     * <p>So Tessera issues the protocol's credentials itself, the way Innoventa does — see
+     * {@code McpCredentialService} for what is signed and {@code ClientAuthorizationFlow} for who approves
+     * it. Identity remains the only thing that authenticates a <em>person</em>: the consent screen is
+     * behind an Identity session, so a client is approved by somebody Identity signed in, and Tessera
+     * mints nothing for anybody it has not already been told about.
+     *
+     * <p>⚠️ <strong>{@code scope} is stated because a document a client reads has to be well-formed</strong>,
+     * not because the scope grants anything: what an agent may do is the approving member's permissions,
+     * resolved per call by the same engine that answers for their browser.
      *
      * <p>⚠️ <strong>Through the DSL, not a filter bean of its own.</strong> A separately-registered
      * {@code OAuth2ProtectedResourceMetadataFilter} is ordered <em>after</em> the security chain, so
@@ -87,7 +102,8 @@ public class SecurityConfiguration {
     private void describeThisResource(OAuth2ProtectedResourceMetadata.Builder metadata) {
         metadata.resource(resource)
                 .resourceName("Tessera")
-                .authorizationServer(issuer)
+                .authorizationServer(resource)
+                .scope(AuthorizationRoutes.SCOPE)
                 // Header only. A token in a query string ends up in access logs, browser history and
                 // proxy caches, and the protocol needs neither of the other two ways.
                 .bearerMethods(methods -> {
@@ -97,11 +113,70 @@ public class SecurityConfiguration {
                 .tlsClientCertificateBoundAccessTokens(false);
     }
 
+    /**
+     * The protocol endpoint, and <strong>only</strong> credentials Tessera itself signed.
+     *
+     * <h3>⚠️ This is where the confinement is, and it is cryptographic</h3>
+     *
+     * <p>The decoder here verifies HS256 against Tessera's own secret; {@link #jwtDecoder} verifies RS256
+     * against Identity's JWKS. Neither can be made to accept the other's token, so two things are true
+     * without anything having to check them: a credential a person approved for a client works
+     * <em>nowhere but here</em>, and the token a browser holds cannot drive the tools. Before this chain
+     * existed the second half was false — the endpoint accepted an ordinary Identity token, which
+     * {@code McpConfiguration} called out as a real gap for exactly as long as it was there.
+     *
+     * <p>⚠️ <strong>The matcher compares the request URI itself, and it has to.</strong> A path pattern —
+     * {@code securityMatcher("/api/mcp", "/api/mcp/*")}, the obvious spelling — silently matches
+     * <em>nothing</em> here: the protocol is served by a servlet of its own mapped at {@code /api/mcp/*},
+     * so Spring Security matches patterns against the path <em>within that servlet</em>, which for
+     * {@code POST /api/mcp} is empty. The chain simply never answered, every request fell through to the
+     * browser chain below, and the symptom was the opposite of a security error — an ordinary Identity
+     * token driving the tools with a cheerful {@code 200}, exactly the confinement this chain exists to
+     * end. Found by presenting such a token on purpose and expecting a refusal.
+     *
+     * <p>The authorities converter is shared with the browser chain on purpose. An agent is a person: the
+     * same subject resolves to the same {@code Member} row and the same global tier, and everything below
+     * this line is unaware there are two ways in.
+     */
     @Bean
-    SecurityFilterChain securityFilterChain(
+    @Order(1)
+    SecurityFilterChain mcpSecurityFilterChain(
         HttpSecurity httpSecurity,
+        // ⚠️ QUALIFIED, AND NOT AS A FORMALITY. There are two JwtDecoder beans, one of them @Primary, and
+        // a primary candidate beats a parameter-name match — so the obvious spelling (a parameter simply
+        // named mcpJwtDecoder) silently handed this chain IDENTITY's decoder. The endpoint then accepted
+        // exactly the token it exists to refuse and refused the credential it exists to accept, with
+        // nothing anywhere saying so. Found by presenting both tokens and reading both answers.
+        @Qualifier("mcpJwtDecoder") JwtDecoder mcpJwtDecoder,
         JwtAuthenticationConverter jwtAuthenticationConverter
     ) throws Exception {
+        httpSecurity
+            .securityMatcher(SecurityConfiguration::isProtocolRequest)
+            .csrf(csrf -> csrf.disable())
+            .authorizeHttpRequests(authorize -> authorize.anyRequest().authenticated())
+            .oauth2ResourceServer(resourceServer -> resourceServer
+                .jwt(jwt -> jwt
+                    .decoder(mcpJwtDecoder)
+                    .jwtAuthenticationConverter(jwtAuthenticationConverter))
+                // ⚠️ Load-bearing on this chain above all others: the 401 it produces is the FIRST thing
+                // a client ever gets, and the `resource_metadata` parameter this adds to
+                // WWW-Authenticate is the only reason the client knows where discovery starts.
+                .protectedResourceMetadata(metadata ->
+                    metadata.protectedResourceMetadataCustomizer(this::describeThisResource)));
+
+        return httpSecurity.build();
+    }
+
+    @Bean
+    @Order(2)
+    SecurityFilterChain securityFilterChain(
+        HttpSecurity httpSecurity,
+        @Qualifier("jwtDecoder") JwtDecoder jwtDecoder,
+        JwtAuthenticationConverter jwtAuthenticationConverter,
+        McpAuthorizationProperties mcpAuthorization
+    ) throws Exception {
+        AuthorizationRoutes mcpRoutes = mcpAuthorization.routes();
+
         httpSecurity
             .csrf(csrf -> csrf.disable())
             .authorizeHttpRequests(authorize -> authorize
@@ -110,18 +185,54 @@ public class SecurityConfiguration {
                 // client-side route for this filter chain to know about — the browser never asks
                 // this port for one.
                 .requestMatchers("/actuator/health").permitAll()
-                // ⚠️ Public, and it must be: a Model Context Protocol client reads this document to
-                // find out WHERE TO GET A TOKEN, so requiring one to read it is a circle. It discloses
-                // nothing that the 401 on /api/mcp does not already announce in its own
+                // ⚠️ Public, and it must be: a Model Context Protocol client reads these documents to
+                // find out WHERE TO GET A CREDENTIAL, so requiring one to read them is a circle. They
+                // disclose nothing that the 401 on /api/mcp does not already announce in its own
                 // WWW-Authenticate header.
-                .requestMatchers(METADATA_PATH).permitAll()
+                //
+                // ⚠️ AND THEY LIVE AT THE SITE ROOT because RFC 9728 and RFC 8414 say so — which makes
+                // this a deployment fact as much as a security rule: a reverse proxy that forwards only
+                // /api leaves discovery answering with the frontend's HTML.
+                .requestMatchers(AuthorizationRoutes.WELL_KNOWN_PATTERN).permitAll()
+                // The three steps a client walks before it holds anything. Each grants nothing on its
+                // own: registration hands out a label, authorization hands the browser to a screen where
+                // a PERSON decides, and the token endpoint spends a code that only exists because
+                // somebody already approved it. Review and approval are NOT here — they are the person's
+                // half and require their session.
+                //
+                // ⚠️ And the consent screen itself is public, because a browser arrives at it carrying
+                // nothing: it is an empty page until its own script has found the session this
+                // application already put in the browser's storage. Everything it then calls — review,
+                // approve — falls through to authenticated() below, which is where the actual gate is.
+                .requestMatchers(
+                    mcpRoutes.registration(),
+                    mcpRoutes.authorization(),
+                    mcpRoutes.token(),
+                    mcpRoutes.consentRoute()).permitAll()
                 .anyRequest().authenticated())
             .oauth2ResourceServer(resourceServer -> resourceServer
-                .jwt(jwt -> jwt.jwtAuthenticationConverter(jwtAuthenticationConverter))
+                // ⚠️ Named explicitly, unlike before: there are two JwtDecoder beans now, and a
+                // by-type lookup between them fails at startup rather than picking wrong — but only
+                // because it is stated here. Never let this resolve implicitly again.
+                .jwt(jwt -> jwt
+                    .decoder(jwtDecoder)
+                    .jwtAuthenticationConverter(jwtAuthenticationConverter))
                 .protectedResourceMetadata(metadata ->
                     metadata.protectedResourceMetadataCustomizer(this::describeThisResource)));
 
         return httpSecurity.build();
+    }
+
+    /**
+     * Whether a request is for the protocol endpoint, judged on the address as sent.
+     *
+     * <p>Independent of servlet mappings, path-pattern parsing and any context path — see
+     * {@link #mcpSecurityFilterChain} for what happens when it is not.
+     */
+    private static boolean isProtocolRequest(HttpServletRequest request) {
+        String path = request.getRequestURI().substring(request.getContextPath().length());
+
+        return path.equals(McpEndpoint.PATH) || path.startsWith(McpEndpoint.PATH + "/");
     }
 
     /**
@@ -136,7 +247,15 @@ public class SecurityConfiguration {
         return converter;
     }
 
+    /**
+     * Identity's tokens — everything a browser does.
+     *
+     * <p>⚠️ {@code @Primary} because {@code McpAuthorizationConfiguration} contributes a second
+     * {@link JwtDecoder} for the protocol endpoint. This is the general case; that one is reachable only
+     * where it is named.
+     */
     @Bean
+    @Primary
     JwtDecoder jwtDecoder(OAuth2ResourceServerProperties resourceServerProperties) {
         NimbusJwtDecoder jwtDecoder = NimbusJwtDecoder
             .withJwkSetUri(resourceServerProperties.getJwt().getJwkSetUri())
