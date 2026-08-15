@@ -260,6 +260,20 @@
             <artifactId>jmouse-ai-jpa</artifactId>
             <version>${jmouse.version}</version>
         </dependency>
+        <!-- The starter, which this product spent four hundred lines of `AiConfiguration` doing by
+             hand on the strength of a comment saying there was no starter on Spring Boot 3. That was
+             copied from the product that really is on Boot 3; this one has been on Boot 4 for some
+             time, and the other Boot 4 product has taken this module all along.
+
+             Everything it contributes is @ConditionalOnMissingBean, so the two beans that remain in
+             `AiConfiguration` still win, and the @Components that decide something — the caller
+             resolver, the authorizer, the scope resolver — it steps aside for without either side
+             naming the other. -->
+        <dependency>
+            <groupId>org.jmouse</groupId>
+            <artifactId>jmouse-ai-spring-boot</artifactId>
+            <version>${jmouse.version}</version>
+        </dependency>
         <!-- The bridge between a tool caller and the access engine. Taken for `CallerSubjects` alone:
              a caller acting on behalf of somebody IS the engine's service sub-account, and that one
              translation has to be identical wherever it is made. Tessera's own ToolAuthorizer omitted

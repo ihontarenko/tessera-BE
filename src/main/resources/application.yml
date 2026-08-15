@@ -227,18 +227,29 @@ jmouse:
     # database-backed settings source filters every read and every write by.
     application: tessera
 
-    # ⚠️ THERE IS DELIBERATELY NOTHING ELSE HERE, AND THAT IS THE POINT. The provider, the model, the
-    # per-answer ceiling and the key are ROWS in `ai_provider_settings`, administered under
-    # Administration → AI behind `ai:administer` — not a file, a deploy and an environment variable
-    # somebody has to be trusted with. Rotating a leaked key is a form and takes effect on the next
-    # request, because `JpaProviderSettingsSource` reads the row per call rather than at startup.
+    # ⚠️ `source: database` IS THE WHOLE PROVIDER CONFIGURATION, AND IT IS ONE WORD ON PURPOSE. Which
+    # provider answers, which model, the per-answer ceiling and the key are ROWS in
+    # `ai_provider_settings`, administered under Administration → AI behind `ai:administer` — not a
+    # file, a deploy and an environment variable somebody has to be trusted with. Rotating a leaked key
+    # is a form and takes effect on the next request, because `JpaProviderSettingsSource` reads the row
+    # per call rather than at startup.
     #
-    # ⚠️ Do not "helpfully" add a `provider:` block back. It would be bound by nothing (`AiConfiguration`
-    # no longer has the property class) and would read as the real configuration to the next person.
+    # ⚠️ `name:` IS DELIBERATELY ABSENT, and adding it is the mistake to never make. It is what
+    # `AiProviderAutoConfiguration` is conditional on, and its ChatModel would pick an implementation
+    # from a property — the one thing that then cannot be changed on a screen. A blank value activates
+    # that configuration and refuses to start; a real one quietly takes the choice away from the
+    # screen. `AiConfiguration.aiChatModel` reads the provider from the same row as the model and key.
+    #
+    # ⚠️ This block used to say "do not add a `provider:` block back", which was true while nothing
+    # bound it and became false the moment this product took the starter: without `source`, the
+    # settings source and the provider administration are both @ConditionalOnProperty'd away, and the
+    # application does not start.
     #
     # With no active row the assistant is simply off and `/assistant` says so — an installation with
     # tools and no model is a supported arrangement, since a connected Model Context Protocol client
     # reaches every action without one.
+    provider:
+      source: database
 
     # ⚠️ THE MANAGEMENT SCREENS ANSWER AT THE LIBRARY'S OWN DEFAULT, `/jmouse-ai`, ON PURPOSE — every
     # route under it is visibly not Tessera's, which is the point while this arrangement is new. Moving
@@ -250,8 +261,41 @@ jmouse:
     # states what each of them requires, since a library's handler cannot carry @RequiresAccess itself.
     # `AccessDeclarationsTest` fails the build if one is mounted with nothing said about it.
     #
-    # ⚠️ There is no `management.enabled: true` because that key is what the STARTER reads, and there is
-    # no starter here — the six controllers are declared by hand in `config/AiConfiguration`.
+    # ⚠️ ON, and this key is load-bearing: the module being on the classpath is not enough, because
+    # these endpoints publish a call history, a provider configuration and every agent in the
+    # installation, and nothing inside the module guards them. `security/access/AiManagementAccess`
+    # is what does — it states the requirement ABOUT each controller type, since a library's handler
+    # cannot carry @RequiresAccess itself, and `AccessDeclarationsTest` fails the build if one is
+    # mounted with nothing said about it.
+    management:
+      enabled: true
+
+    # ⚠️ These were numbers in Java until this product took the starter, and they were numbers in Java
+    # only because nothing was binding them. A tracker's bulk operation is a handful of issues rather
+    # than a hundred rows, so the ceiling is lower than the library's default and confirmation starts
+    # sooner — that is the one opinion here worth having.
+    guards:
+      per-call-ceiling: 50
+      confirmation-threshold: 3
+      confirmation-lifetime: 5m
+      deduplication-window: 60s
+
+      # Every guard this product believes it has, named. A chain missing one refuses to start rather
+      # than running without protection somebody thinks is there.
+      required:
+        - rate-limit
+        - ceiling
+        - empty-destruction
+        - confirmation
+        - deduplication
+
+    rate-limit:
+      allowance: 60
+      period: 1m
+
+    conversation:
+      maximum-rounds: 6
+      maximum-tokens: 120000
 
   # The shared client-authorization flow — registration, authorization, the token endpoint and the
   # consent screen — served by jmouse-ai-mcp-authorization rather than written out here.
