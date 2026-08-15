@@ -3,6 +3,9 @@ package net.innoventa.tessera.exception;
 import net.innoventa.tessera.security.access.AccessReason;
 import org.jmouse.storage.exception.ObjectNotFoundException;
 import org.jmouse.storage.exception.UploadRejectedException;
+import org.jmouse.ai.administration.ProviderAdministration;
+import org.jmouse.ai.agent.AgentConnections;
+import org.jmouse.ai.agent.AgentDirectory;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -63,6 +66,26 @@ public class GlobalExceptionHandler {
         problem.setProperty("axis", exception.getAxis().name().toLowerCase());
 
         return problem;
+    }
+
+    /**
+     * A library port declining, in the sentence it declined with.
+     *
+     * <p>⚠️ <strong>Unmapped, these were 500s — and a 500 is silent.</strong> Every one of these
+     * exceptions carries a carefully worded explanation of why something will not be done, and the
+     * interface's global handler only raises a toast for 4xx. So the most considered refusals in the
+     * product arrived as "Internal Server Error" in a log nobody was reading, and the screen simply did
+     * nothing when a button was pressed. Found by pressing one.
+     *
+     * <p>{@code CONFLICT} rather than {@code BAD_REQUEST}: the request was well formed and the caller was
+     * entitled to make it — the answer is that the thing being asked for conflicts with what is there.
+     */
+    @ExceptionHandler({
+            AgentDirectory.RefusedException.class,
+            AgentConnections.RefusedException.class,
+            ProviderAdministration.RefusedException.class})
+    ProblemDetail handlePortRefusal(RuntimeException exception) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.CONFLICT, exception.getMessage());
     }
 
     @ExceptionHandler(InvalidRequestException.class)
