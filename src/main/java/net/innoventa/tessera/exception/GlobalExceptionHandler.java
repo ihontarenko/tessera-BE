@@ -1,6 +1,8 @@
 package net.innoventa.tessera.exception;
 
 import net.innoventa.tessera.security.access.AccessReason;
+import org.jmouse.storage.exception.ObjectNotFoundException;
+import org.jmouse.storage.exception.UploadRejectedException;
 import org.springframework.http.HttpStatus;
 import org.springframework.http.ProblemDetail;
 import org.springframework.web.bind.MethodArgumentNotValidException;
@@ -66,6 +68,31 @@ public class GlobalExceptionHandler {
     @ExceptionHandler(InvalidRequestException.class)
     ProblemDetail handleInvalidRequest(InvalidRequestException exception) {
         return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, exception.getMessage());
+    }
+
+    /**
+     * An upload the storage policy would not take — wrong type, wrong extension, empty, or over the
+     * size ceiling.
+     *
+     * <p>400 rather than 413 even when the cause is size: the library raises one exception for every
+     * way an upload can be unacceptable and its message already says which, so splitting the status by
+     * re-reading that message would be guessing. What a person needs is the sentence, and they get it.
+     */
+    @ExceptionHandler(UploadRejectedException.class)
+    ProblemDetail handleUploadRejected(UploadRejectedException exception) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.BAD_REQUEST, exception.getMessage());
+    }
+
+    /**
+     * A stored object that is registered but whose bytes are not where the registry says.
+     *
+     * <p>404, because from the caller's side it is indistinguishable from asking for something that was
+     * never there — and the alternative, a 500, would say Tessera is broken when what is missing is a
+     * file somebody removed from a bucket.
+     */
+    @ExceptionHandler(ObjectNotFoundException.class)
+    ProblemDetail handleStoredObjectNotFound(ObjectNotFoundException exception) {
+        return ProblemDetail.forStatusAndDetail(HttpStatus.NOT_FOUND, exception.getMessage());
     }
 
     @ExceptionHandler(MethodArgumentNotValidException.class)

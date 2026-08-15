@@ -9,7 +9,9 @@ import org.springframework.boot.persistence.autoconfigure.EntityScan;
  * rows in.</strong> {@code jmouse-ai-jpa} owns {@code ai_pending_confirmations} — a preview waiting for
  * the call that confirms it — along with the call counters and provider settings.
  * {@code jmouse-access-jpa} owns every {@code access_*} table: the roles, their bundles, who holds
- * them, and the personal allow or deny that beats them.
+ * them, and the personal allow or deny that beats them. {@code jmouse-storage-jpa} owns
+ * {@code stored_files} — one row per set of bytes anybody uploaded, and what {@code members.avatar_file_id}
+ * points at.
  *
  * <p><strong>Whoever owns the table owns the mapping.</strong> A Tessera {@code @Entity} over a
  * library's schema would be kept honest only by {@code ddl-auto: validate}, which is a hope rather than
@@ -22,7 +24,8 @@ import org.springframework.boot.persistence.autoconfigure.EntityScan;
  * migrations.
  */
 @SpringBootApplication
-@EntityScan({"net.innoventa.tessera", "org.jmouse.ai.jpa.entity", "org.jmouse.access.jpa.entity"})
+@EntityScan({"net.innoventa.tessera", "org.jmouse.ai.jpa.entity", "org.jmouse.access.jpa.entity",
+             "org.jmouse.storage.jpa"})
 public class TesseraApplication {
 
     public static void main(String[] arguments) {

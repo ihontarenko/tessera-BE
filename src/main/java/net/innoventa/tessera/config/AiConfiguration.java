@@ -16,30 +16,44 @@ import org.jmouse.ai.guard.GuardSettings;
 import org.jmouse.ai.guard.InMemoryDuplicateCallStore;
 import org.jmouse.ai.guard.RateLimitGuard;
 import org.jmouse.ai.guard.TokenBucketCallerRateLimiter;
+import org.jmouse.ai.administration.ProviderAdministration;
+import org.jmouse.ai.agent.AgentConnections;
+import org.jmouse.ai.agent.AgentDirectory;
+import org.jmouse.ai.jpa.JpaAgentConnections;
+import org.jmouse.ai.jpa.JpaAgentDirectory;
+import org.jmouse.ai.jpa.JpaCallCounter;
 import org.jmouse.ai.jpa.JpaConfirmationStore;
+import org.jmouse.ai.jpa.JpaProviderAdministration;
+import org.jmouse.ai.jpa.JpaProviderSettingsSource;
 import org.jmouse.ai.jpa.migration.AiDialect;
 import org.jmouse.ai.jpa.migration.AiMigrations;
-import org.jmouse.ai.provider.AnthropicChatModel;
+import org.jmouse.ai.management.OverviewController;
+import org.jmouse.ai.management.ProviderAdministrationController;
+import org.jmouse.ai.management.ProviderController;
+import org.jmouse.ai.management.ToolCallHistoryController;
+import org.jmouse.ai.management.ToolCatalogController;
+import org.jmouse.ai.management.UsageController;
 import org.jmouse.ai.provider.ChatModel;
-import org.jmouse.ai.provider.GatewayChatModel;
-import org.jmouse.ai.provider.OpenAiChatModel;
-import org.jmouse.ai.provider.ProviderSettings;
 import org.jmouse.ai.provider.ProviderSettingsSource;
+import org.jmouse.ai.provider.RoutingChatModel;
 import org.jmouse.ai.spi.CallerResolver;
 import org.jmouse.ai.spi.ConfirmationStore;
-import org.jmouse.ai.spi.InvocationTrace;
 import org.jmouse.ai.spi.PermissionVocabulary;
 import org.jmouse.ai.spi.ScopeResolver;
 import org.jmouse.ai.spi.ToolAuthorizer;
 import org.jmouse.ai.conversation.ConversationBudget;
 import org.jmouse.ai.conversation.ConversationRunner;
+import org.jmouse.ai.conversation.SettingsProviderRegistry;
+import org.jmouse.ai.view.ProviderRegistry;
+import org.jmouse.ai.view.ToolCallHistory;
+import org.jmouse.ai.view.ToolCatalogView;
+import org.jmouse.ai.view.UsageTotals;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.InitializingBean;
 import org.springframework.beans.factory.ObjectProvider;
 import org.springframework.beans.factory.config.BeanDefinition;
 import org.springframework.beans.factory.config.BeanFactoryPostProcessor;
-import org.springframework.boot.autoconfigure.condition.ConditionalOnProperty;
 import org.springframework.boot.context.properties.ConfigurationProperties;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
@@ -52,7 +66,7 @@ import java.time.Duration;
 import java.util.ArrayList;
 import java.util.Arrays;
 import java.util.List;
-import java.util.Locale;
+import java.util.Map;
 import java.util.Set;
 import java.util.TreeSet;
 import java.util.stream.Collectors;
@@ -76,10 +90,19 @@ import java.util.stream.Collectors;
  *       constructor parameters.
  *   <li><strong>The guards</strong>, and the chain over them.
  *   <li><strong>The catalogue and the dispatcher.</strong>
- *   <li><strong>A model</strong>, if one is configured — and nothing at all if not, which is a
- *       supported arrangement rather than a mistake.
+ *   <li><strong>A model</strong>, resolved per turn from the row that is in force. An installation
+ *       with no active row has tools and no assistant, which is a supported arrangement rather than a
+ *       mistake — a connected protocol client reaches every action without a model.
+ *   <li><strong>The read ports a management screen needs</strong> — the catalogue, the counters and
+ *       what is in force.
  *   <li><strong>The schema.</strong> The library ships its own migrations and its own history table.
  * </ol>
+ *
+ * <p>⚠️ <strong>The provider stopped being a property.</strong> It used to be
+ * {@code tessera.ai.provider.*} bound here and frozen at startup; it is now a row in
+ * {@code ai_provider_settings}, administered on the AI screen behind {@code ai:administer}. That is
+ * Innoventa's arrangement and the one {@code application.yml} said to copy — rotating a key is a form
+ * rather than a file, a deploy and an environment variable somebody has to be trusted with.
  */
 @Configuration
 @ConfigurationProperties(prefix = "tessera.ai")
@@ -165,56 +188,212 @@ public class AiConfiguration {
             CallerResolver  callers,
             ToolAuthorizer  authorizer,
             ScopeResolver   scopes,
-            GuardChain      guards) {
+            GuardChain      guards,
+            JpaCallCounter  counter) {
 
-        // ⚠️ InvocationTrace.none() is a stated gap, not an oversight. Tessera already records every
-        // issue change in its own activity log through the services the handlers call, so a tool call
-        // is audited by the same rows a person's edit is. What is NOT recorded is the call itself —
-        // how often each action is used and where it is refused — and that arrives with `jmouse-ai-jpa`'s
-        // counter when there is somebody to read it.
-        return new ToolDispatcher(catalog, callers, authorizer, scopes, guards, InvocationTrace.none());
+        // The counter, now that there is a screen to read it on. Tessera still records every issue
+        // change in its own activity log through the services the handlers call, so WHAT a tool did is
+        // audited by the same rows a person's edit is; what that never recorded is the CALL — how often
+        // each action is used and where it is refused — and this is that.
+        return new ToolDispatcher(catalog, callers, authorizer, scopes, guards, counter);
     }
 
-    // ── The model, if there is one ───────────────────────────────────────────────
+    // ── What a management screen reads ───────────────────────────────────────────
 
-    private final Provider provider = new Provider();
+    /**
+     * The counters, which are both halves at once.
+     *
+     * <p>{@link JpaCallCounter} implements the writing port ({@code InvocationTrace}) and the reading
+     * one ({@link UsageTotals}) over the same rows. Its table arrives with the library's own migrations.
+     *
+     * <p>⚠️ <strong>One bean, injected by its own type.</strong> Declaring a second one that returned
+     * the same instance as {@link UsageTotals} looks tidier and refuses to start: two candidates for one
+     * port, and the message says nothing about counters.
+     */
+    @Bean
+    public JpaCallCounter aiCallCounter(EntityManagerFactory entityManagers) {
+        return new JpaCallCounter(entityManagers);
+    }
 
-    public Provider getProvider() {
-        return provider;
+    // ── Agents and the clients connected to them ─────────────────────────────────
+
+    /**
+     * Which agents exist, who owns them, and whether they may act.
+     *
+     * <p>⚠️ <strong>These two replaced a {@code mcp_credentials} table this product owned.</strong> The
+     * old row was the <em>connection</em> and nothing else, which meant there was no identity to grant a
+     * narrower permission to, nothing to switch off short of ending every client, and nothing for a
+     * record to name afterwards. An {@code Agent} is the persona; a connection belongs to one; one agent
+     * has many.
+     *
+     * <p>Wired by hand because this product wires the whole library by hand — it takes the modules rather
+     * than {@code jmouse-ai-spring-boot}. The tables arrive through
+     * {@link #aiFlywayMigrator(DataSource)} below, in the library's own history.
+     */
+    @Bean
+    public AgentDirectory aiAgentDirectory(EntityManagerFactory entityManagers) {
+        return new JpaAgentDirectory(entityManagers);
     }
 
     /**
-     * The provider, if one is configured.
+     * The clients connected to those agents.
      *
-     * <p>⚠️ Conditional on the name being set, so an installation with tools and no model starts
-     * perfectly and simply has no assistant — {@code AssistantService} asks for the runner lazily and
-     * says so.
+     * <p>⚠️ Storage only. What a credential <em>is</em> stays with {@code McpCredentialService}: HS256,
+     * a secret only this product holds, and a confinement that is a signature rather than a check.
      */
     @Bean
-    @ConditionalOnProperty(name = "tessera.ai.provider.name")
-    public ChatModel aiChatModel() {
-        ProviderSettingsSource settings = ProviderSettingsSource.fixed(new ProviderSettings(
-                normalised(provider.getName()),
-                provider.getModel(),
-                provider.getApiKey(),
-                provider.getApiUrl(),
-                provider.getMaximumTokens()));
+    public AgentConnections aiAgentConnections(EntityManagerFactory entityManagers) {
+        return new JpaAgentConnections(entityManagers);
+    }
 
-        return switch (normalised(provider.getName())) {
-            case AnthropicChatModel.PROVIDER_NAME -> new AnthropicChatModel(settings);
-            case OpenAiChatModel.PROVIDER_NAME    -> new OpenAiChatModel(settings);
-            case GatewayChatModel.PROVIDER_NAME   -> new GatewayChatModel(settings);
-            default -> throw new IllegalStateException(
-                    "'tessera.ai.provider.name' is '" + provider.getName() + "', which is not a "
-                    + "provider this library ships. Available: anthropic, openai, gateway. Leave it "
-                    + "unset for an installation that has tools and no model.");
-        };
+    /**
+     * ⚠️ <strong>Empty, and the screen says which kind of empty it is.</strong> A per-call trail is a
+     * product's rows in a product's vocabulary — Innoventa answers this port from its audit log — and
+     * Tessera has no such table. The counters above are what it has instead, so the Activity screen
+     * shows totals and states outright that no per-call trail is recorded, rather than showing an empty
+     * list that reads as "nothing has ever been called".
+     */
+    @Bean
+    public ToolCallHistory aiToolCallHistory() {
+        return ToolCallHistory.none();
+    }
+
+    /** The catalogue's answers, handed over without handing over the catalogue itself. */
+    @Bean
+    public ToolCatalogView aiToolCatalogView(ToolCatalog catalog) {
+        return ToolCatalogView.over(catalog);
+    }
+
+    /**
+     * What is in force, with the credential reduced to a yes or a no at the boundary.
+     *
+     * <p>⚠️ Answered from the settings source rather than from the rows, deliberately: the screen's
+     * whole job is to tell "what somebody typed" apart from "what resolved", and those disagree when
+     * nothing is active, when two rows are, and when the active row has no key.
+     */
+    @Bean
+    public ProviderRegistry aiProviderRegistry(ProviderSettingsSource settingsSource) {
+        return new SettingsProviderRegistry(settingsSource);
+    }
+
+    // ── The model, which is a row rather than a property ─────────────────────────
+
+    /**
+     * Whose rows these are, where one installation's {@code ai_provider_settings} serves more than one
+     * application. Bound from {@code tessera.ai.application}.
+     */
+    private String application = "tessera";
+
+    public String getApplication() {
+        return application;
+    }
+
+    public void setApplication(String application) {
+        this.application = application;
+    }
+
+    /**
+     * The settings in force, read from the database on every call.
+     *
+     * <p><strong>This is what makes the provider a screen and not a redeploy.</strong> Which provider
+     * answers, which model, what one answer may cost and the key it authenticates with are all rows in
+     * {@code ai_provider_settings}, administered by somebody holding {@code ai:administer} — rather
+     * than a file, a deploy and an environment variable somebody has to be trusted with. Rotating a
+     * leaked key is a form and takes effect on the next request.
+     *
+     * <p>⚠️ Reading rather than caching: settings bound into a bean at startup mean a restart, which is
+     * exactly what nobody wants to be doing at the moment a key leaks. One indexed query against one
+     * row, next to an HTTP call that will take a thousand times longer.
+     */
+    @Bean
+    public ProviderSettingsSource aiProviderSettingsSource(EntityManagerFactory entityManagers) {
+        return new JpaProviderSettingsSource(entityManagers, application);
+    }
+
+    /**
+     * The write half of the same rows.
+     *
+     * <p>⚠️ <strong>The library's, not Tessera's.</strong> Every rule it keeps — exactly one row in
+     * force, a blank key meaning <em>keep the stored one</em>, a refusal to delete what is in force — is
+     * a condition {@link JpaProviderSettingsSource} above refuses to resolve without. Re-deriving them
+     * in a product service was the duplicate this cluster removed, in both directions: the rules and the
+     * six routes over them now exist once.
+     */
+    @Bean
+    public ProviderAdministration aiProviderAdministration(EntityManagerFactory entityManagers) {
+        return new JpaProviderAdministration(entityManagers, application);
+    }
+
+    /**
+     * The model, chosen by the row that is in force.
+     *
+     * <p>⚠️ Unconditional, unlike the property-driven bean it replaces. An installation with no active
+     * row still starts perfectly and simply has no assistant — the refusal comes from the settings
+     * source at the moment somebody asks, and {@code AssistantService} asks
+     * {@link org.jmouse.ai.view.ProviderRegistry} rather than this bean whether there is anything to
+     * ask.
+     */
+    @Bean
+    public ChatModel aiChatModel(ProviderSettingsSource settingsSource) {
+        return RoutingChatModel.overShippedProviders(settingsSource);
     }
 
     @Bean
-    @ConditionalOnProperty(name = "tessera.ai.provider.name")
     public ConversationRunner aiConversationRunner(ChatModel model, ToolDispatcher dispatcher) {
         return new ConversationRunner(model, dispatcher, new ConversationBudget(6, 120_000));
+    }
+
+    // ── The screens, which are the library's controllers ─────────────────────────
+
+    /**
+     * {@code jmouse-ai-management}'s six controllers, declared by hand.
+     *
+     * <p><strong>The module rather than a copy of it.</strong> Innoventa wrote its own
+     * {@code /api/ai} controller because a library's handler cannot carry {@code @RequiresAccess} and
+     * guarding it meant a URL rule gated on a <em>role</em>. That was a real problem with the wrong fix:
+     * the answer is to declare the requirement <em>about</em> a foreign type — see {@code AiManagementAccess}
+     * — after which these are gated by the same engine, on the same axes, as everything Tessera wrote.
+     *
+     * <p>Declared here rather than auto-configured because there is no starter on Boot 3: {@code
+     * AiManagementAutoConfiguration} does exactly this, and this is that file's hand-written half.
+     *
+     * <p>Where they answer is {@code jmouse.ai.management.prefix}, set to {@code /api/ai} — inside the
+     * prefix Spring Security already authenticates, and where the interface's own client is pointed.
+     */
+    @Bean
+    public ToolCatalogController aiToolCatalogController(ToolCatalogView tools) {
+        return new ToolCatalogController(tools);
+    }
+
+    @Bean
+    public ToolCallHistoryController aiToolCallHistoryController(
+            ToolCallHistory history, ToolCatalogView tools) {
+
+        return new ToolCallHistoryController(history, tools);
+    }
+
+    @Bean
+    public UsageController aiUsageController(JpaCallCounter counter) {
+        return new UsageController(counter);
+    }
+
+    @Bean
+    public ProviderController aiProviderController(ProviderRegistry providers) {
+        return new ProviderController(providers);
+    }
+
+    @Bean
+    public OverviewController aiOverviewController(
+            ProviderRegistry providers, ToolCatalogView tools, ToolCallHistory history) {
+
+        return new OverviewController(providers, tools, history);
+    }
+
+    @Bean
+    public ProviderAdministrationController aiProviderAdministrationController(
+            ProviderAdministration configurations) {
+
+        return new ProviderAdministrationController(configurations);
     }
 
     // ── The schema ───────────────────────────────────────────────────────────────
@@ -278,10 +457,6 @@ public class AiConfiguration {
         };
     }
 
-    private static String normalised(String name) {
-        return name == null ? "" : name.trim().toLowerCase(Locale.ROOT);
-    }
-
     private static String valueOf(Field field) {
         try {
             return (String) field.get(null);
@@ -291,53 +466,4 @@ public class AiConfiguration {
         }
     }
 
-    /** Bound from {@code tessera.ai.provider.*}. */
-    public static class Provider {
-
-        private String name;
-        private String model;
-        private String apiKey;
-        private String apiUrl;
-        private int    maximumTokens = 4_096;
-
-        public String getName() {
-            return name;
-        }
-
-        public void setName(String name) {
-            this.name = name;
-        }
-
-        public String getModel() {
-            return model;
-        }
-
-        public void setModel(String model) {
-            this.model = model;
-        }
-
-        public String getApiKey() {
-            return apiKey;
-        }
-
-        public void setApiKey(String apiKey) {
-            this.apiKey = apiKey;
-        }
-
-        public String getApiUrl() {
-            return apiUrl;
-        }
-
-        public void setApiUrl(String apiUrl) {
-            this.apiUrl = apiUrl;
-        }
-
-        public int getMaximumTokens() {
-            return maximumTokens;
-        }
-
-        public void setMaximumTokens(int maximumTokens) {
-            this.maximumTokens = maximumTokens;
-        }
-    }
 }

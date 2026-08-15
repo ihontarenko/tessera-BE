@@ -86,6 +86,30 @@ public final class Permissions {
      */
     public static final String ADMINISTER_CONFIGURATION = "configuration:administer";
 
+    /**
+     * See what the tools have been asked to do, and what is in force behind the assistant.
+     *
+     * <p>⚠️ <strong>A disclosure surface rather than a convenience.</strong> It reports every caller's
+     * activity across the installation — which action, on whose behalf, how often, and how it ended —
+     * so it is asked for by name rather than inherited from administering one project's issues.
+     *
+     * <p>⚠️ <strong>Deliberately not folded into {@link #ADMINISTER_CONFIGURATION}.</strong> That one
+     * is named for the catalogs, and its own javadoc says an installation-wide concern that is not the
+     * configuration should have to ask for a grant of its own. The model this installation talks to is
+     * exactly such a concern.
+     */
+    public static final String READ_AI = "ai:read";
+
+    /**
+     * Choose the model, hold the key, and decide what is in force.
+     *
+     * <p>⚠️ <strong>Separate from {@link #READ_AI} because these are two different powers.</strong>
+     * Reading the trail says what has been spent; this one decides what this installation sends
+     * somebody else's servers and holds the credential it pays with. Reading does not imply spending,
+     * and the intersection is nobody's convenience.
+     */
+    public static final String ADMINISTER_AI = "ai:administer";
+
     private static final List<String> ALL = List.of(
             BROWSE_PROJECT,
             CREATE_ISSUE,
@@ -97,7 +121,9 @@ public final class Permissions {
             MANAGE_SPRINT,
             ADMINISTER_PROJECT,
             ADMINISTER_ACCESS,
-            ADMINISTER_CONFIGURATION);
+            ADMINISTER_CONFIGURATION,
+            READ_AI,
+            ADMINISTER_AI);
 
     /**
      * The catalogue, as the engine's third registration.

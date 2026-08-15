@@ -68,6 +68,21 @@ policy "tessera" {
         # It gates WRITES ONLY. `GET /api/configuration*` stays open to any
         # signed-in caller, because every picker in the product is built from it.
         configuration:administer "Edit the catalogs every project runs on — statuses, workflows, issue types, schemes"
+
+        # ⚠️ The twelfth and thirteenth, and TWO rather than one because they are two
+        # different powers. `ai:read` DISCLOSES what every caller has asked the tools
+        # to do — which action, on whose behalf, how often, and how it ended — across
+        # the whole installation. `ai:administer` decides WHAT THIS INSTALLATION SENDS
+        # SOMEBODY ELSE'S SERVERS and holds the key it pays with. Reading the trail
+        # does not imply spending the money, and the intersection is nobody's
+        # convenience.
+        #
+        # ⚠️ NOT FOLDED INTO `configuration:administer`. That one is named for the
+        # catalogs, and its own note says an installation-wide concern that is NOT the
+        # configuration — accounts, licensing, quotas — should have to ask for a grant
+        # of its own. Which model answers, and on whose key, is exactly one of those.
+        ai:read             "See what is in force behind the assistant, and what the tools have been asked to do"
+        ai:administer       "Choose the model this installation talks to, and hold the key it pays with"
     }
 
     # ── The three project roles ───────────────────────────────────────────────
@@ -139,9 +154,17 @@ policy "tessera" {
     #
     # There is deliberately no `@GLOBAL *`. A wildcard is convenient exactly where
     # convenience is worst.
+    # ⚠️ AND IT CARRIES THE TWO AI PERMISSIONS FOR THE SAME REASON `configuration:administer`
+    # is here rather than in a role of its own: nothing assigns a global role from a
+    # screen, so a second one would sit in the catalog held by nobody. They stay
+    # separable where it matters — each is its own switch on the access screen, so an
+    # installation that wants the model in different hands takes them off here and
+    # grants them personally.
     declare role GLOBAL_ACCESS_ADMINISTRATOR assignable @GLOBAL {
         @GLOBAL  access:administer
         @GLOBAL  configuration:administer
+        @GLOBAL  ai:read
+        @GLOBAL  ai:administer
     }
 
     # ⚠️ THE ROLE IS DECLARED HERE AND ASSIGNED IN CODE, unlike Innoventa's, and the

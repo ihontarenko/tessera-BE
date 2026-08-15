@@ -69,6 +69,16 @@ spring:
       fail-on-unknown-properties: false
     time-zone: UTC
 
+  # The one multipart route in the whole service is an avatar upload, and the interface has already
+  # cropped and downscaled the image to a 256x256 PNG before it is sent — see UI/src/lib/squareImage.ts.
+  # So these are not a policy, they are a backstop against a client that skipped that step: what a real
+  # avatar weighs is tens of kilobytes, and `tessera.file.max-size-bytes` is the limit that actually
+  # refuses, with a message a person can read. This one only stops the socket.
+  servlet:
+    multipart:
+      max-file-size: ${TESSERA_MULTIPART_MAX_FILE_SIZE:4MB}
+      max-request-size: ${TESSERA_MULTIPART_MAX_REQUEST_SIZE:4MB}
+
 server:
   port: ${TESSERA_SERVER_PORT:8100}
   error:
@@ -128,7 +138,121 @@ tessera:
   bootstrap:
     owner: ${TESSERA_BOOTSTRAP_OWNER:SU}
 
+  # Bytes, read by jmouse-storage under the prefix declared in `jmouse.storage.prefix` below.
+  #
+  # Tessera stores one kind of file: a member's uploaded avatar. Everything here is sized for that and
+  # for nothing else, which is why the limit is a megabyte rather than the tens Innoventa and Moneta
+  # allow — an avatar arrives already cropped to 256x256, so anything approaching this ceiling is a
+  # client that did not do that, and refusing it is correct.
+  file:
+    # local | aws | minio | supabase — the last three all speak S3. Switching is a change here and
+    # nowhere else; a stored row records which backend wrote it, so files already written keep being
+    # served from wherever they are.
+    provider: ${TESSERA_FILE_PROVIDER:local}
+    storage-directory: ${TESSERA_FILE_STORAGE_DIR:./uploads}
+    max-size-bytes: ${TESSERA_FILE_MAX_SIZE_BYTES:1048576}
+
+    # ⚠️ AN ALLOWLIST, AND A NARROW ONE, because unlike Innoventa's file cabinet this accepts exactly
+    # one thing: a picture of a person. Neither shipped profile fits — ALLOW_DOCUMENTS_AND_IMAGES also
+    # admits PDF and Office documents, which an avatar route has no business taking.
+    #
+    # ⚠️ SVG IS ABSENT ON PURPOSE. It is an image by every intuition and a script host by
+    # specification, and /api/public/avatars/** serves its bytes unauthenticated — see
+    # PublicAvatarController for why that route is public and why this is the line that makes it safe.
+    #
+    # ⚠️ A SHIPPED PROFILE, BECAUSE `CUSTOM` DOES NOT WORK IN THE LIBRARY AS OF 1.0.0-b20260802.
+    # Writing the lists out by hand fails both ways it can be written: a YAML sequence arrives as
+    # `…content-types[0]`, `[1]`, … and StorageSettingsBinder's name-walk turns those into keys
+    # literally called `contentTypes[0]`, so the allowlist binds EMPTY and every upload is refused
+    # with "File type 'image/png' is not allowed"; a comma-separated string binds far enough to reach
+    # CollectionBinder, which then cannot resolve `Set<String>`'s element type and fails the whole
+    # application at boot with "No binder found for bindable type 'Object'". Innoventa and Moneta
+    # never met either because both use a shipped profile and declare no lists at all.
+    #
+    # ⚠️ SO THIS IS THE BRACES AND `MemberAvatarService.ACCEPTED_PICTURE_TYPES` IS THE BELT.
+    # This profile is an allowlist that excludes SVG, HTML and every script host — which is the
+    # property the public byte route actually depends on — but it also admits PDF and Office
+    # documents, which an avatar endpoint has no business taking. Tessera narrows it to raster images
+    # in its own code rather than loosening what the route may serve. Delete that narrowing only
+    # after `CUSTOM` binds.
+    upload:
+      profile: ALLOW_DOCUMENTS_AND_IMAGES
+
+    # Every avatar is content-addressed, so two people who pick the same picture cost one object.
+    content-addressed-keys: ${TESSERA_FILE_CONTENT_ADDRESSED_KEYS:true}
+
+    cache:
+      # An avatar URL names a content digest, so its bytes can never change under a cached copy —
+      # replacing your picture produces a different URL. The only thing a long lifetime costs is a
+      # stale image for somebody who was deleted, which is not a thing that happens.
+      streamed-public-max-age: ${TESSERA_FILE_CACHE_PUBLIC_MAX_AGE:365d}
+      streamed-private-max-age: ${TESSERA_FILE_CACHE_PRIVATE_MAX_AGE:1h}
+      redirect-safety-margin: ${TESSERA_FILE_REDIRECT_SAFETY_MARGIN:1m}
+
+    s3:
+      bucket: ${TESSERA_S3_BUCKET:tessera}
+      access-key: ${TESSERA_S3_ACCESS_KEY:}
+      secret-key: ${TESSERA_S3_SECRET_KEY:}
+      region: ${TESSERA_S3_REGION:}
+      endpoint: ${TESSERA_S3_ENDPOINT:}
+      # The browser-facing host a presigned link is signed against, when it differs from `endpoint`.
+      # A redirect embeds the signing host, so an internal-only endpoint produces links no real client
+      # can reach. Defaults to `endpoint` when unset.
+      public-endpoint: ${TESSERA_S3_PUBLIC_ENDPOINT:}
+      link-time-to-live: ${TESSERA_S3_LINK_TIME_TO_LIVE:15m}
+
+    # Reclaims objects nothing points at any more — an avatar somebody replaced or cleared. Off by
+    # default: the first run against real data is also the first honest measurement of how much has
+    # been leaking, and that is worth watching rather than discovering. The grace period is not a
+    # tuning knob — it is what stops the sweeper deleting an object written seconds ago by a
+    # transaction that has not committed yet.
+    sweeper:
+      enabled: ${TESSERA_FILE_SWEEPER_ENABLED:false}
+      grace-period: ${TESSERA_FILE_SWEEPER_GRACE_PERIOD:24h}
+
 jmouse:
+  # jmouse-storage reads its settings from wherever the product already publishes them, so this points
+  # it at the `tessera.file.*` keys above rather than inventing a second place to configure storage.
+  storage:
+    prefix: tessera.file
+    # The sweep's cron lives here rather than under the product prefix: a @Scheduled expression is
+    # resolved long before the settings record is bound, so it cannot follow a prefix that is itself
+    # configuration. Whether the sweep does anything is still `tessera.file.sweeper.enabled`.
+    sweeper:
+      schedule: ${TESSERA_FILE_SWEEPER_SCHEDULE:0 0 3 * * *}
+
+  ai:
+    # Whose rows these are, where one installation's `ai_provider_settings` serves more than one
+    # application — the same database already carries Innoventa's. This is the lookup key the
+    # database-backed settings source filters every read and every write by.
+    application: tessera
+
+    # ⚠️ THERE IS DELIBERATELY NOTHING ELSE HERE, AND THAT IS THE POINT. The provider, the model, the
+    # per-answer ceiling and the key are ROWS in `ai_provider_settings`, administered under
+    # Administration → AI behind `ai:administer` — not a file, a deploy and an environment variable
+    # somebody has to be trusted with. Rotating a leaked key is a form and takes effect on the next
+    # request, because `JpaProviderSettingsSource` reads the row per call rather than at startup.
+    #
+    # ⚠️ Do not "helpfully" add a `provider:` block back. It would be bound by nothing (`AiConfiguration`
+    # no longer has the property class) and would read as the real configuration to the next person.
+    #
+    # With no active row the assistant is simply off and `/assistant` says so — an installation with
+    # tools and no model is a supported arrangement, since a connected Model Context Protocol client
+    # reaches every action without one.
+
+    # ⚠️ THE MANAGEMENT SCREENS ANSWER AT THE LIBRARY'S OWN DEFAULT, `/jmouse-ai`, ON PURPOSE — every
+    # route under it is visibly not Tessera's, which is the point while this arrangement is new. Moving
+    # them under `/api/ai` is one `management.prefix:` line here plus the matching entry in the Vite
+    # proxy, and nothing else.
+    #
+    # ⚠️ Being outside `/api` is not being outside authorization. Spring Security's second chain has no
+    # matcher, so `anyRequest().authenticated()` reaches these; and `security/access/AiManagementAccess`
+    # states what each of them requires, since a library's handler cannot carry @RequiresAccess itself.
+    # `AccessDeclarationsTest` fails the build if one is mounted with nothing said about it.
+    #
+    # ⚠️ There is no `management.enabled: true` because that key is what the STARTER reads, and there is
+    # no starter here — the six controllers are declared by hand in `config/AiConfiguration`.
+
   # The shared client-authorization flow — registration, authorization, the token endpoint and the
   # consent screen — served by jmouse-ai-mcp-authorization rather than written out here.
   mcp:

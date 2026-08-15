@@ -7,7 +7,7 @@ import net.innoventa.tessera.exception.BusinessRuleViolationException;
 import org.jmouse.ai.conversation.ConversationRequest;
 import org.jmouse.ai.conversation.ConversationResult;
 import org.jmouse.ai.conversation.ConversationRunner;
-import org.springframework.beans.factory.ObjectProvider;
+import org.jmouse.ai.view.ProviderRegistry;
 import org.springframework.stereotype.Service;
 
 /**
@@ -31,14 +31,21 @@ import org.springframework.stereotype.Service;
 @RequiredArgsConstructor
 public class AssistantService {
 
+    private final ConversationRunner runner;
+
     /**
-     * ⚠️ Optional on purpose. The runner exists only where a provider is configured, and an
-     * installation with tools and no model is a supported arrangement rather than a mistake.
+     * ⚠️ <strong>What decides whether there is an assistant, now that the runner always exists.</strong>
+     * The provider is a row rather than a property, so the model is resolved per turn and the bean is
+     * built unconditionally — which means its presence stopped being the answer to "is the assistant
+     * on". This port is the answer: it reports what the settings source actually resolved, and it is
+     * empty when nothing is in force.
      */
-    private final ObjectProvider<ConversationRunner> runner;
+    private final ProviderRegistry providers;
 
     public AssistantResponse answer(AssistantRequest request) {
-        ConversationResult result = requireRunner().run(
+        requireProvider();
+
+        ConversationResult result = runner.run(
                 ConversationRequest.continuing(request.messages())
                         .withSystem(AssistantPrompt.SYSTEM)
                         .asking(request.question()));
@@ -52,20 +59,24 @@ public class AssistantService {
                 result.usage().outputTokens());
     }
 
-    /** Whether this installation has a model at all, so a screen can be absent rather than broken. */
+    /**
+     * Whether this installation has a usable model, so a screen can be absent rather than broken.
+     *
+     * <p>⚠️ <strong>A model <em>and</em> a key.</strong> A configuration with no credential resolves
+     * perfectly and would be refused before anything was sent, so it does not count as available — a
+     * chat box answering every message with the same authentication error is worse than no chat box.
+     */
     public boolean isAvailable() {
-        return runner.getIfAvailable() != null;
+        return providers.active().filter(ProviderRegistry.ActiveProvider::keyConfigured).isPresent();
     }
 
-    private ConversationRunner requireRunner() {
-        ConversationRunner available = runner.getIfAvailable();
-
-        if (available != null) {
-            return available;
+    private void requireProvider() {
+        if (isAvailable()) {
+            return;
         }
 
         throw new BusinessRuleViolationException(
-                "This installation has no model configured, so the assistant cannot answer. Set the "
-                + "provider under 'jmouse.ai.provider' to switch it on.");
+                "This installation has no model in force, so the assistant cannot answer. Add a provider "
+                + "configuration under Administration → AI and put it in force.");
     }
 }

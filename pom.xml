@@ -199,6 +199,37 @@
             <version>${jmouse.version}</version>
         </dependency>
 
+        <!-- Bytes. Tessera stores exactly one kind of file today — a member's avatar — and stores it
+             through the same library Innoventa and Moneta use rather than writing a third answer to
+             "where did that upload go". What arrives is the whole mechanism: the acceptance policy,
+             the key layout, the digest and its deduplication, the registry row, and a delivery
+             planner that decides between streaming and a presigned redirect.
+
+             ⚠️ jmouse-storage-jpa OWNS `stored_files`, mapping and migrations included, against a
+             history table of its own — exactly like jmouse-access-jpa owns the access_* tables. So
+             Tessera writes no @Entity over it and adds `org.jmouse.storage.jpa` to its @EntityScan.
+             Its Flyway run is ordered BEFORE the product's by the library itself, which is what lets
+             V000018 declare a foreign key into a table Tessera never created.
+
+             ⚠️ S3 is on the classpath but unused: `tessera.file.provider` is `local`, and the whole
+             point of carrying the module anyway is that moving avatars to MinIO later is a change to
+             the yaml and to nothing else. -->
+        <dependency>
+            <groupId>org.jmouse</groupId>
+            <artifactId>jmouse-storage-spring-boot</artifactId>
+            <version>${jmouse.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.jmouse</groupId>
+            <artifactId>jmouse-storage-jpa</artifactId>
+            <version>${jmouse.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.jmouse</groupId>
+            <artifactId>jmouse-storage-s3</artifactId>
+            <version>${jmouse.version}</version>
+        </dependency>
+
         <!-- The tool mechanism. Tessera contributed nothing to its design, which is the point: if a
              tracker can get tools and an assistant from a handful of ToolDefinition beans, the
              abstraction is real, and anything that has to change in the library is the most valuable
@@ -229,6 +260,32 @@
             <artifactId>jmouse-ai-jpa</artifactId>
             <version>${jmouse.version}</version>
         </dependency>
+        <!-- The bridge between a tool caller and the access engine. Taken for `CallerSubjects` alone:
+             a caller acting on behalf of somebody IS the engine's service sub-account, and that one
+             translation has to be identical wherever it is made. Tessera's own ToolAuthorizer omitted
+             it and quietly authorized a restricted agent as its owner.
+
+             ⚠️ Its AccessToolAuthorizer is NOT in use yet — it needs a ScopeCatalog this product has
+             not published — so `TesseraToolAuthorizer` stays the bean and borrows the translation. -->
+        <dependency>
+            <groupId>org.jmouse</groupId>
+            <artifactId>jmouse-ai-access</artifactId>
+            <version>${jmouse.version}</version>
+        </dependency>
+        <!-- The management screens' server half — the catalogue, the trail, the counters, what is in
+             force, and the one thing that writes: the provider configuration.
+
+             ⚠️ NOTHING IN IT IS GUARDED. A library's handler cannot carry @RequiresAccess, so Tessera
+             states the rule ABOUT those types instead — see `AiManagementAccess`, whose ExternalAccessRules
+             bean gates them on `ai:read` / `ai:administer` at GLOBAL through the same engine as every
+             route Tessera wrote itself. The alternative, a URL rule keyed on a role, reaches none of the
+             axes and is the arrangement that made Innoventa write its own copy of this module. -->
+        <dependency>
+            <groupId>org.jmouse</groupId>
+            <artifactId>jmouse-ai-management</artifactId>
+            <version>${jmouse.version}</version>
+        </dependency>
+
         <!-- The catalogue, published over the Model Context Protocol. ⚠️ It decides nothing: every
              handler it exposes goes through the same ToolDispatcher the in-app assistant calls, so
              there is no second path into an action and no second place a permission is checked.

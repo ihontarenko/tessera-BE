@@ -2,6 +2,7 @@ package net.innoventa.tessera.config;
 
 import jakarta.servlet.http.HttpServletRequest;
 import net.innoventa.tessera.ai.McpEndpoint;
+import net.innoventa.tessera.dto.PublicAvatarRoutes;
 import org.springframework.beans.factory.annotation.Qualifier;
 import org.jmouse.ai.mcp.authorization.AuthorizationRoutes;
 import org.jmouse.ai.mcp.authorization.server.McpAuthorizationProperties;
@@ -14,6 +15,7 @@ import org.springframework.core.annotation.Order;
 import org.springframework.security.config.annotation.method.configuration.EnableMethodSecurity;
 import org.springframework.security.config.annotation.web.builders.HttpSecurity;
 import org.springframework.security.config.annotation.web.configuration.EnableWebSecurity;
+import org.springframework.security.config.annotation.web.configurers.AbstractHttpConfigurer;
 import org.springframework.security.oauth2.core.DelegatingOAuth2TokenValidator;
 import org.springframework.security.oauth2.core.OAuth2Error;
 import org.springframework.security.oauth2.core.OAuth2TokenValidator;
@@ -152,7 +154,7 @@ public class SecurityConfiguration {
     ) throws Exception {
         httpSecurity
             .securityMatcher(SecurityConfiguration::isProtocolRequest)
-            .csrf(csrf -> csrf.disable())
+            .csrf(AbstractHttpConfigurer::disable)
             .authorizeHttpRequests(authorize -> authorize.anyRequest().authenticated())
             .oauth2ResourceServer(resourceServer -> resourceServer
                 .jwt(jwt -> jwt
@@ -209,6 +211,17 @@ public class SecurityConfiguration {
                     mcpRoutes.authorization(),
                     mcpRoutes.token(),
                     mcpRoutes.consentRoute()).permitAll()
+                // ⚠️ Avatar bytes, and the only route here that serves data rather than protocol
+                // metadata. It is public because an <img> tag sends no Authorization header and cannot
+                // be given one — the alternative is fetching every thumbnail as a blob in JavaScript.
+                //
+                // The address is a capability, not a name: it carries a random registry identifier, so
+                // it cannot be constructed from knowing who somebody is, cannot be walked to the next
+                // person, and is only ever learned from an authenticated response that already showed
+                // you that member. And what may be stored behind it is an allowlist of raster image
+                // types with SVG deliberately absent — see PublicAvatarController, which is where the
+                // whole argument is written down.
+                .requestMatchers(PublicAvatarRoutes.PATTERN).permitAll()
                 .anyRequest().authenticated())
             .oauth2ResourceServer(resourceServer -> resourceServer
                 // ⚠️ Named explicitly, unlike before: there are two JwtDecoder beans now, and a

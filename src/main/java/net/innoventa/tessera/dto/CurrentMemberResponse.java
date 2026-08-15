@@ -24,6 +24,7 @@ public record CurrentMemberResponse(
     String subject,
     String displayName,
     String email,
+    MemberAvatarView avatar,
     SystemRole systemRole,
     List<String> globalPermissions
 ) {
@@ -34,6 +35,7 @@ public record CurrentMemberResponse(
             member.getSubject(),
             member.getDisplayName(),
             member.getEmail(),
+            MemberAvatarView.from(member),
             member.getSystemRole(),
             globalPermissions
         );

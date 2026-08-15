@@ -37,3 +37,7 @@ hs_err_pid*
 *sensitive.yml
 *public.properties
 *.db
+
+# Locally stored file bytes. `tessera.file.provider: local` writes uploads here, so these are
+# somebody's actual avatars from a dev run — runtime data, not source.
+uploads/
