@@ -131,6 +131,19 @@ public class ProjectAccess {
                 .toList();
     }
 
+    /**
+     * Whether this member holds a permission <em>anywhere at all</em> — installation-wide, at a project,
+     * or over their own rows.
+     *
+     * <p>⚠️ Not {@code holds(member, someProject, permission)}, and the difference matters where this is
+     * used: the agents screen offers what an owner could hand down, and a permission held in one project
+     * is one an agent can be given. Asking about a particular place would offer too little; asking the
+     * installation's catalogue would offer too much, and a grant beyond the owner resolves to nothing.
+     */
+    public boolean holdsAnywhere(Member member, String permission) {
+        return !visibilityScopes.of(subjectOf(member), permission).seesNothing();
+    }
+
     /** Whether this member browses every project there is, which no list of identifiers can express. */
     public boolean browsesEveryProject(Member member) {
         return visibilityScopes.of(subjectOf(member), Permissions.BROWSE_PROJECT).breadth()

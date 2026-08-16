@@ -4,6 +4,7 @@ import net.innoventa.tessera.security.Permissions;
 import org.jmouse.access.enforcement.ExternalAccessRules;
 import org.jmouse.access.enforcement.ExternalAccessRules.Declaration;
 import org.jmouse.ai.management.AgentAdministrationController;
+import org.jmouse.ai.management.AgentSelfController;
 import org.jmouse.ai.management.OverviewController;
 import org.jmouse.ai.management.ProviderAdministrationController;
 import org.jmouse.ai.management.ProviderController;
@@ -62,6 +63,12 @@ public class AiManagementAccess {
                 // writes switch an agent off or end somebody's client mid-session. Neither belongs with
                 // the power to watch what the tools did.
                 .type(AgentAdministrationController.class, administering)
+                // ⚠️ Only signed in, and deliberately no permission at all. Every route on it resolves
+                // the owner from the security context and refuses an agent that is not the caller's, so
+                // the authorization that matters is inside the handler rather than in front of it —
+                // asking for a permission here would gate somebody's own agents behind an
+                // administrator's, which is a screen that works for nobody.
+                .type(AgentSelfController.class, Declaration.authenticated())
                 .build();
     }
 }
