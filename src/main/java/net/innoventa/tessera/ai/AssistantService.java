@@ -67,7 +67,7 @@ public class AssistantService {
      * chat box answering every message with the same authentication error is worse than no chat box.
      */
     public boolean isAvailable() {
-        return providers.active().filter(ProviderRegistry.ActiveProvider::keyConfigured).isPresent();
+        return providers.active().filter(ProviderRegistry.ActiveProvider::usable).isPresent();
     }
 
     private void requireProvider() {
