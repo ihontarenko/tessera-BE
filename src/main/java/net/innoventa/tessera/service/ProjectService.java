@@ -99,6 +99,7 @@ public class ProjectService {
             .id(idGenerator.get())
             .key(request.key())
             .name(request.name())
+            .icon(ProjectIcon.normalize(request.icon()))
             .leadMemberId(leadMemberId)
             // ⚠️ Read from the settings row, not named here. Schemes are editable and deletable now
             // (ticket 06), and a constant naming one is a way to break project creation from the
@@ -187,6 +188,9 @@ public class ProjectService {
         Project project = requireProject(projectId);
 
         project.setName(request.name());
+        // ⚠️ Blank clears it rather than being ignored: the field is how somebody removes an icon, and a
+        // "leave it alone if empty" rule would make removal impossible through the only control there is.
+        project.setIcon(ProjectIcon.normalize(request.icon()));
         project.setLeadMemberId(memberService.requireMember(request.leadMemberId()).getId());
         project.setIssueTypeSchemeId(requireIssueTypeScheme(request.issueTypeSchemeId()));
         project.setWorkflowSchemeId(requireWorkflowScheme(request.workflowSchemeId()));
@@ -201,6 +205,12 @@ public class ProjectService {
         // before it happens rather than discovered afterwards.
         project.setKeyStrategy(requireKeyStrategy(request.keyStrategy()));
         project.setKeyPattern(requireKeyPattern(request.keyStrategy(), request.keyPattern()));
+
+        // ⚠️ Stored as it arrives. The category lives in WiQ's database, so this service cannot check
+        // that it exists without becoming a client of WiQ — which is the backend-to-backend call WIQ-1
+        // §1 refuses. The browser picked it from WiQ's own tree; a root that stops resolving is a state
+        // the wiki tab handles rather than an error this method can prevent.
+        project.setWiqRootCategoryId(blankToNull(request.wiqRootCategoryId()));
 
         return toResponse(project, member);
     }
@@ -301,6 +311,7 @@ public class ProjectService {
             project.getId(),
             project.getKey(),
             project.getName(),
+            project.getIcon(),
             boardScopeStrategy,
             lead,
             issueTypeScheme,
@@ -308,10 +319,16 @@ public class ProjectService {
             estimationScheme,
             project.getKeyStrategy(),
             project.getKeyPattern(),
+            project.getWiqRootCategoryId(),
             myPermissions,
             project.getCreatedAt(),
             project.getUpdatedAt()
         );
+    }
+
+    /** A cleared picker posts an empty string, and "" is not an identifier anything could resolve. */
+    private static String blankToNull(String value) {
+        return value == null || value.isBlank() ? null : value;
     }
 
 }

@@ -10,6 +10,8 @@ import jakarta.validation.constraints.Size;
  */
 public record UpdateProjectRequest(
     @NotBlank @Size(max = 128) String name,
+    /** ⚠️ Blank clears it — no icon is a project's ordinary state, not a missing value (TSSR-7). */
+    @Size(max = 16) String icon,
     @NotNull String leadMemberId,
     @NotNull String issueTypeSchemeId,
     @NotNull String workflowSchemeId,
@@ -19,5 +21,17 @@ public record UpdateProjectRequest(
     @NotNull String keyStrategy,
     /** ⚠️ Read only by {@code CUSTOM}, and validated to contain {@code ${sequence}} when it is. */
     String keyPattern
+,
+
+    /**
+     * Which WiQ section this project's wiki lives in — an identifier from ANOTHER service, or null
+     * where nobody has chosen one (WIQ-10; WIQ-1 §3).
+     *
+     * <p>⚠️ <strong>Not validated here, and it cannot be.</strong> The category lives in WiQ's
+     * database; this service has no way to ask whether it exists without becoming a client of WiQ,
+     * which is precisely the backend-to-backend call WIQ-1 §1 refuses. The browser picked it from
+     * WiQ's own tree, and a root that stops resolving is a state the wiki tab handles.
+     */
+    String wiqRootCategoryId
 ) {
 }

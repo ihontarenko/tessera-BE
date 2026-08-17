@@ -36,6 +36,20 @@ public class Project {
     @Column(nullable = false, length = 128)
     private String name;
 
+    /**
+     * One emoji standing for this project, or null (TSSR-7).
+     *
+     * <p>⚠️ <strong>Sixteen characters to hold one glyph.</strong> An emoji is a grapheme cluster, not a
+     * character: a flag is two code points, a family joined by zero-width joiners is seven. "Exactly one"
+     * is enforced by {@link net.innoventa.tessera.service.ProjectIcon}, which counts clusters; the column
+     * only has to be wide enough for the longest of them.
+     *
+     * <p>Null is the ordinary state — every screen falls back to the shared folder glyph — so nothing has
+     * to be backfilled and no project is invalid without one.
+     */
+    @Column(length = 16)
+    private String icon;
+
     @Column(name = "lead_member_id", nullable = false, length = 36)
     private String leadMemberId;
 
@@ -62,6 +76,23 @@ public class Project {
     /** Optional template the strategy interprets, e.g. {@code {key}-{sequence}}. */
     @Column(name = "key_pattern", length = 128)
     private String keyPattern;
+
+    /**
+     * Which WiQ section this project's wiki lives in, or null where nobody has chosen one yet
+     * (WIQ-10; WIQ-1 §3).
+     *
+     * <p>⚠️ <strong>An identifier in ANOTHER SERVICE'S DATABASE.</strong> There is no foreign key and
+     * there cannot be one: WiQ owns the tree, its categories are bare, and this is a consumer naming
+     * its own root. Which also means the section can be deleted or moved out from under this row
+     * without anything here noticing — so a root that no longer resolves is a STATE the screen handles,
+     * not an error.
+     *
+     * <p>⚠️ <strong>Null is ordinary.</strong> Before one is chosen the wiki tab says "pick a category"
+     * to an administrator and "the wiki is not configured" to everybody else — two empty states,
+     * because those are two different situations and one of them is somebody's job.
+     */
+    @Column(name = "wiq_root_category_id", length = 36)
+    private String wiqRootCategoryId;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;

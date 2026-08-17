@@ -20,6 +20,8 @@ public record ProjectResponse(
     String id,
     String key,
     String name,
+    /** One emoji, or null — every screen falls back to the shared folder glyph (TSSR-7). */
+    String icon,
     BoardScopeStrategy boardScopeStrategy,
     MemberSummary lead,
     SchemeSummary issueTypeScheme,
@@ -34,6 +36,8 @@ public record ProjectResponse(
     EstimationSchemeResponse estimationScheme,
     String keyStrategy,
     String keyPattern,
+    /** Which WiQ section this project's wiki lives in, or null where nobody has chosen one. */
+    String wiqRootCategoryId,
     List<String> myPermissions,
     LocalDateTime createdAt,
     LocalDateTime updatedAt

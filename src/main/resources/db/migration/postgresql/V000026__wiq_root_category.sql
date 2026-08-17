@@ -1,0 +1,31 @@
+-- =============================================================================
+--  V000026  Which WiQ section this project's wiki lives in (WIQ-10; WIQ-1 §3)
+--
+--  Universal SQL: MySQL / PostgreSQL compatible. Identical to the mysql copy
+--  bar its utf8mb4 header.
+--
+--  ⚠️ THE CONSUMER CONFIGURES ITS OWN ROOT, AND THAT IS WiQ'S DECISION RATHER
+--  THAN A CONVENIENCE. WiQ's categories are BARE — no owner column, no workspace,
+--  nothing naming which product a section belongs to (WIQ-1 §2). Ownership would
+--  have made "only this person may see section X" a rule each product could
+--  interpret differently; instead there is one authority, and a consumer says
+--  which branch is its own.
+--
+--  ⚠️ A PLAIN VARCHAR AND NO FOREIGN KEY, DELIBERATELY. The category lives in
+--  ANOTHER SERVICE'S DATABASE. There is nothing to reference, nothing to cascade,
+--  and no way for this schema to notice that somebody deleted the section — which
+--  is exactly why the screen has to handle a root that no longer resolves, and
+--  why that is a state rather than an error.
+--
+--  ⚠️ NULL IS THE ORDINARY STATE and means "not configured yet". WIQ-1 §3: before
+--  one is chosen the tab says "pick a category" to an administrator and "the wiki
+--  is not configured" to everybody else. Two empty states, because those are two
+--  different situations and one of them is somebody's job.
+--
+--  ⚠️ TWO PROJECTS MAY POINT AT THE SAME BRANCH, so there is no unique index. That
+--  is allowed on purpose — a shared handbook is a real arrangement — and it is why
+--  this is a setting rather than an ownership claim.
+-- =============================================================================
+
+ALTER TABLE projects
+    ADD COLUMN wiq_root_category_id VARCHAR(36);
