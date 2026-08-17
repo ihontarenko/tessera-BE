@@ -11,6 +11,7 @@ import net.innoventa.tessera.domain.Priority;
 import net.innoventa.tessera.domain.Sprint;
 import net.innoventa.tessera.domain.SprintIssue;
 import net.innoventa.tessera.domain.Status;
+import net.innoventa.tessera.domain.StatusCategory;
 import net.innoventa.tessera.domain.IssueType;
 import net.innoventa.tessera.dto.MemberSummary;
 import net.innoventa.tessera.dto.board.BoardCardView;
@@ -79,6 +80,7 @@ public class BoardService {
     private final SprintMembershipService sprintMembershipService;
     private final IssueFilterViewFactory issueFilterViewFactory;
     private final BoardFilterEvaluator boardFilterEvaluator;
+    private final IssueBlockers issueBlockers;
 
     /**
      * @param filter an optional jME predicate over one issue (ADR-0008), e.g.
@@ -214,7 +216,9 @@ public class BoardService {
         Sprint activeSprint,
         Set<String> committedIssueIds
     ) {
-        List<Issue> projectIssues = issueRepository.findByProjectIdOrderByRankAsc(projectId);
+        // Archived issues are off the board whatever the strategy (TSSR-4) — the flag is the one control,
+        // and it is applied here, at the source, rather than by each of the things that read this list.
+        List<Issue> projectIssues = issueRepository.findByProjectIdAndArchivedAtIsNullOrderByRankAsc(projectId);
 
         if (board.getScopeStrategy() != BoardScopeStrategy.ACTIVE_SPRINT) {
             return projectIssues;
@@ -318,6 +322,7 @@ public class BoardService {
             issue.getAssigneeMemberId(),
             issue.getPriorityId(),
             catalogs.epicKeys.get(issue.getId()),
+            catalogs.blockedIssueIds.contains(issue.getId()),
             issue.getResolvedAt()
         );
     }
@@ -345,7 +350,10 @@ public class BoardService {
             types,
             priorityRepository.findAll().stream().collect(Collectors.toMap(Priority::getId, Function.identity())),
             memberRepository.findAllById(memberIds).stream().collect(Collectors.toMap(Member::getId, Function.identity())),
-            epicResolver.resolveAll(issues, types, ancestorLookup(issues))
+            epicResolver.resolveAll(issues, types, ancestorLookup(issues)),
+            // ⚠️ Once for the slice, not once per card (TSSR-41). A full board is every issue in the
+            // project, and asking per card would be three queries each for a single boolean.
+            issueBlockers.blockedAmong(issues.stream().map(Issue::getId).toList(), StatusCategory.IN_PROGRESS)
         );
     }
 
@@ -369,7 +377,8 @@ public class BoardService {
         Map<String, IssueType> types,
         Map<String, Priority> priorities,
         Map<String, Member> members,
-        Map<String, String> epicKeys
+        Map<String, String> epicKeys,
+        Set<String> blockedIssueIds
     ) {
     }
 

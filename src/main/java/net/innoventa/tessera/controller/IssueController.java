@@ -13,6 +13,7 @@ import net.innoventa.tessera.domain.Issue;
 import net.innoventa.tessera.security.Permissions;
 import net.innoventa.tessera.security.access.Scopes;
 import net.innoventa.tessera.security.access.target.IssueByKey;
+import net.innoventa.tessera.service.IssueArchiveService;
 import net.innoventa.tessera.service.IssueHierarchyService;
 import net.innoventa.tessera.service.IssueOrganizationService;
 import net.innoventa.tessera.service.IssueService;
@@ -46,6 +47,7 @@ public class IssueController {
 
     private final IssueService issueService;
     private final TransitionService transitionService;
+    private final IssueArchiveService issueArchiveService;
     private final IssueHierarchyService issueHierarchyService;
     private final IssueOrganizationService issueOrganizationService;
 
@@ -128,6 +130,32 @@ public class IssueController {
         @Valid @RequestBody TransitionIssueRequest request
     ) {
         return transitionService.transition(jwt, issueId, request);
+    }
+
+    /**
+     * Put finished work away, and take it back out (TSSR-4).
+     *
+     * <p>⚠️ <strong>{@code EDIT_ISSUE}, not a permission of its own.</strong> Archiving changes one field
+     * on an issue and is reversible by the same people through the same pair of routes, so a new
+     * permission would be a new thing to grant, revoke and forget — and every installation would have to
+     * be told about it — to gate something anybody who may edit the issue can already do more
+     * destructively by other means.
+     *
+     * <p>⚠️ <strong>Not a transition, either.</strong> A status is a move the workflow allows; archiving
+     * is orthogonal to it and answers to no scheme. Expressing it as a status would mean every workflow
+     * in the installation growing an Archived node, and an issue's real status being lost the moment it
+     * was filed.
+     */
+    @PostMapping("/api/issues/{issueId}/archive")
+    @RequiresAccess(permission = Permissions.EDIT_ISSUE, scope = Scopes.PROJECT, resource = Issue.class)
+    public IssueResponse archive(@AuthenticationPrincipal Jwt jwt, @PathVariable String issueId) {
+        return issueArchiveService.archive(jwt, issueId);
+    }
+
+    @DeleteMapping("/api/issues/{issueId}/archive")
+    @RequiresAccess(permission = Permissions.EDIT_ISSUE, scope = Scopes.PROJECT, resource = Issue.class)
+    public IssueResponse unarchive(@AuthenticationPrincipal Jwt jwt, @PathVariable String issueId) {
+        return issueArchiveService.unarchive(jwt, issueId);
     }
 
     @PutMapping("/api/issues/{issueId}/parent")

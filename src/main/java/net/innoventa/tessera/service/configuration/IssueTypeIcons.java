@@ -35,7 +35,10 @@ public final class IssueTypeIcons {
             // Kinds of work a team actually distinguishes.
             "improvement", "feature", "spike", "chore", "documentation", "design", "research",
             // Things that arrive rather than get planned.
-            "incident", "support", "question", "risk", "security", "debt");
+            "incident", "support", "question", "risk", "security", "debt",
+            // The two smallest, which are neither planned nor arriving — they are noticed. A papercut
+            // is wrong and merely small; a nit was never wrong at all.
+            "papercut", "nit");
 
     /**
      * Whether this is something the field may hold — which includes <em>nothing</em>.

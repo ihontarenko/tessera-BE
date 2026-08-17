@@ -3,6 +3,7 @@ package net.innoventa.tessera.dto.issue;
 import jakarta.validation.constraints.NotBlank;
 import jakarta.validation.constraints.PositiveOrZero;
 import jakarta.validation.constraints.Size;
+import net.innoventa.tessera.domain.Issue;
 
 /**
  * Edit an issue's directly-editable fields — summary, description, priority, assignee, story points
@@ -14,7 +15,7 @@ import jakarta.validation.constraints.Size;
  */
 public record UpdateIssueRequest(
     @NotBlank @Size(max = 255) String summary,
-    @Size(max = 4000) String description,
+    @Size(max = Issue.MAXIMUM_DESCRIPTION_LENGTH) String description,
     @NotBlank String priorityId,
     String assigneeMemberId,
     @PositiveOrZero Double storyPoints

@@ -89,7 +89,9 @@ public class BacklogService {
         Board board = boardService.requireBoard(projectId);
         boolean plansInSprints = board.getScopeStrategy() == BoardScopeStrategy.ACTIVE_SPRINT;
 
-        List<Issue> issues = issueRepository.findByProjectIdOrderByRankAsc(projectId);
+        // Archived work is off every panel here, including a sprint's (TSSR-4): a sprint panel shows what
+        // was committed, and something deliberately put away has stopped being part of that conversation.
+        List<Issue> issues = issueRepository.findByProjectIdAndArchivedAtIsNullOrderByRankAsc(projectId);
         Catalogs catalogs = loadCatalogs(issues);
         BoardService.ColumnMapping mapping = boardService.loadColumnMapping(board.getId());
 

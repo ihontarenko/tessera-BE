@@ -1,6 +1,8 @@
 package net.innoventa.tessera.config;
 
+import net.innoventa.tessera.ai.AssistantPrompt;
 import net.innoventa.tessera.security.Permissions;
+import org.jmouse.ai.preferences.PreferenceDefinition;
 import org.jmouse.ai.provider.ChatModel;
 import org.jmouse.ai.provider.ProviderSettingsSource;
 import org.jmouse.ai.provider.RoutingChatModel;
@@ -82,6 +84,18 @@ public class AiConfiguration {
     @Bean
     public ChatModel aiChatModel(ProviderSettingsSource settingsSource) {
         return RoutingChatModel.overShippedProviders(settingsSource);
+    }
+
+    /**
+     * The assistant's prompt, declared as something an installation may rewrite.
+     *
+     * <p>⚠️ <strong>The shipped wording is still in {@link AssistantPrompt}</strong> — this declares it
+     * as the <em>default</em> of a preference, so a row in {@code ai_preferences} overrides it and an
+     * installation with no row behaves exactly as this build was released. Nothing is seeded.
+     */
+    @Bean
+    public PreferenceDefinition assistantSystemPrompt() {
+        return AssistantPrompt.definition();
     }
 
     private static String valueOf(Field field) {

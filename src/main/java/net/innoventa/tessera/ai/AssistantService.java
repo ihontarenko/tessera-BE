@@ -7,6 +7,7 @@ import net.innoventa.tessera.exception.BusinessRuleViolationException;
 import org.jmouse.ai.conversation.ConversationRequest;
 import org.jmouse.ai.conversation.ConversationResult;
 import org.jmouse.ai.conversation.ConversationRunner;
+import org.jmouse.ai.preferences.AiPreferences;
 import org.jmouse.ai.view.ProviderRegistry;
 import org.springframework.stereotype.Service;
 
@@ -42,12 +43,18 @@ public class AssistantService {
      */
     private final ProviderRegistry providers;
 
+    /** Where the system prompt actually comes from — see {@link AssistantPrompt}. */
+    private final AiPreferences preferences;
+
     public AssistantResponse answer(AssistantRequest request) {
         requireProvider();
 
+        // ⚠️ Read per turn, not held from startup: an installation that rewrites the prompt on the
+        // administration screen means the next question, not the next deploy. It is one indexed row,
+        // and the shipped wording answers where nobody has rewritten anything.
         ConversationResult result = runner.run(
                 ConversationRequest.continuing(request.messages())
-                        .withSystem(AssistantPrompt.SYSTEM)
+                        .withSystem(preferences.value(AssistantPrompt.NAME))
                         .asking(request.question()));
 
         return new AssistantResponse(

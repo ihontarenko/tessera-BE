@@ -1,9 +1,7 @@
 package net.innoventa.tessera.ai.authorization;
 
 import lombok.RequiredArgsConstructor;
-import net.innoventa.tessera.domain.Member;
-import net.innoventa.tessera.repository.MemberRepository;
-import org.jmouse.ai.mcp.authorization.McpAuthorizationException;
+import org.jmouse.ai.agent.Agent;
 import org.jmouse.ai.mcp.authorization.server.CredentialIssuer;
 import org.springframework.stereotype.Component;
 
@@ -12,7 +10,7 @@ import org.springframework.stereotype.Component;
  *
  * <p>The shared flow walks the protocol and stops at exactly this line. What it hands over is an opaque
  * reference and a client's self-declared name; what comes back is a token, a refresh token and a
- * lifetime. It never learns that the reference is a member's identifier, that the token is HS256, or
+ * lifetime. It never learns that the reference is an agent's identifier, that the token is HS256, or
  * that the secret behind it is one only Tessera holds — and that last part is why this interface exists
  * at all, because the other product using the same flow answers the same question a completely different
  * way.
@@ -28,23 +26,26 @@ import org.springframework.stereotype.Component;
 @RequiredArgsConstructor
 public class TesseraCredentialIssuer implements CredentialIssuer {
 
-    private final MemberRepository     members;
     private final McpCredentialService credentials;
 
     /**
-     * ⚠️ The member is looked up again here, at redemption, rather than carried through the code.
+     * ⚠️ <strong>The reference is an agent now, and it used to be a member.</strong>
      *
-     * <p>An approval and its redemption are minutes apart at most, but they are two requests, and the
-     * only party whose standing matters is the one that actually turned up. A member who has been removed
-     * between the two gets a refusal rather than a credential.
+     * <p>The consent screen offered the approving person and nothing else, so the only thing to carry was
+     * who they were; which agent a client became was then worked out on this side, out of their sight.
+     * The screen lists their agents now — the other product's shape, and the reason a person can attach a
+     * second client to a persona they already have instead of finding out afterwards which way it went.
+     *
+     * <p>Everything downstream of the reference is looked up again here rather than carried through the
+     * code: an approval and its redemption are minutes apart at most, but they are two requests, and the
+     * only party whose standing matters is the one that actually turned up.
      */
     @Override
     public IssuedCredential issue(ApprovedAuthorization approval) {
-        Member member = members.findById(approval.subjectReference())
-                .orElseThrow(() -> new McpAuthorizationException(
-                        "The member this code was approved by no longer exists."));
+        Agent agent = credentials.approvedAgent(
+                approval.subjectReference(), approval.clientName(), approval.clientId());
 
-        return asIssued(credentials.issueFor(member, approval.clientName()));
+        return asIssued(credentials.issueFor(agent, approval.clientName(), approval.clientId()));
     }
 
     @Override

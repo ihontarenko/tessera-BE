@@ -2,16 +2,20 @@ package net.innoventa.tessera.service;
 
 import lombok.RequiredArgsConstructor;
 import net.innoventa.tessera.domain.Comment;
+import net.innoventa.tessera.domain.CommentTopic;
 import net.innoventa.tessera.security.CallingAgent;
 import org.jmouse.ai.agent.Agent;
 import net.innoventa.tessera.domain.Issue;
 import net.innoventa.tessera.domain.Member;
 import net.innoventa.tessera.dto.MemberSummary;
 import net.innoventa.tessera.dto.comment.CommentResponse;
+import net.innoventa.tessera.dto.comment.CommentTopicSummary;
 import net.innoventa.tessera.dto.comment.SaveCommentRequest;
+import net.innoventa.tessera.exception.BusinessRuleViolationException;
 import net.innoventa.tessera.exception.ForbiddenException;
 import net.innoventa.tessera.exception.ResourceNotFoundException;
 import net.innoventa.tessera.repository.CommentRepository;
+import net.innoventa.tessera.repository.CommentTopicRepository;
 import net.innoventa.tessera.repository.IssueRepository;
 import net.innoventa.tessera.repository.MemberRepository;
 import net.innoventa.tessera.security.Permissions;
@@ -22,6 +26,7 @@ import org.springframework.transaction.annotation.Transactional;
 
 import java.util.List;
 import java.util.function.Supplier;
+import java.util.stream.Collectors;
 
 /**
  * Issue comments (ticket 13): a flat list, no threading, and a first-class entity kept out of the
@@ -34,6 +39,7 @@ import java.util.function.Supplier;
 public class CommentService {
 
     private final CommentRepository commentRepository;
+    private final CommentTopicRepository commentTopicRepository;
     private final IssueRepository issueRepository;
     private final MemberRepository memberRepository;
     private final ProjectAccess projectAccess;
@@ -71,6 +77,8 @@ public class CommentService {
             .issueId(issueId)
             .authorMemberId(caller.getId())
             .body(request.body())
+            .topicId(requireTopicId(request.topicId()))
+            .parentCommentId(requireAnswerableParent(request.parentCommentId(), issueId))
             .agentId(agent == null ? null : agent.id())
             .agentName(agent == null ? null : agent.name())
             .build());
@@ -90,7 +98,15 @@ public class CommentService {
             throw new ForbiddenException("You can only edit your own comment");
         }
 
+        // ⚠️ Replaced, not merged — an edit that names no topic clears the one that was there. See
+        // SaveCommentRequest: one record serves both moves, and a field given is a field replaced.
+        //
+        // ⚠️ parentCommentId is deliberately NOT read here. What a reply answers is not something an
+        // edit changes, and reading it would mean a caller who reworded a reply and forgot the field
+        // promoted it to the top of the thread.
         comment.setBody(request.body());
+        comment.setTopicId(requireTopicId(request.topicId()));
+
         return toResponse(comment, caller, issue.getProjectId());
     }
 
@@ -106,6 +122,15 @@ public class CommentService {
             throw new ForbiddenException("You can only delete your own comment");
         }
 
+        // ⚠️ The replies go with it, and the service does this rather than an ON DELETE CASCADE — so the
+        // screen can say how many first. An answer to a comment that no longer exists is an answer to
+        // nothing: it reads as a non-sequitur, and no reader can recover what it meant.
+        List<Comment> replies = commentRepository.findByParentCommentIdOrderByCreatedAtAsc(commentId);
+
+        if (!replies.isEmpty()) {
+            commentRepository.deleteAll(replies);
+        }
+
         commentRepository.delete(comment);
     }
 
@@ -117,15 +142,80 @@ public class CommentService {
         boolean isAuthor = comment.getAuthorMemberId().equals(caller.getId());
         boolean isAdministrator = projectAccess.holds(caller, projectId, Permissions.ADMINISTER_PROJECT);
 
+        CommentTopicSummary topic = comment.getTopicId() == null
+            ? null
+            : commentTopicRepository.findById(comment.getTopicId()).map(CommentTopicSummary::from).orElse(null);
+
         return new CommentResponse(
             comment.getId(),
             author,
             comment.getAgentName(),
+            topic,
+            comment.getParentCommentId(),
             comment.getBody(),
             isAuthor || isAdministrator,
             comment.getCreatedAt(),
             comment.getUpdatedAt()
         );
+    }
+
+    /**
+     * The topic as it is stored: null when nothing was named, and refused when the catalog does not know
+     * it — with the names that would have worked, the way every other named reference here fails.
+     *
+     * <p>Blank collapses to null rather than being looked up: a select that was cleared posts an empty
+     * string, and "" is not an id the catalog could ever hold.
+     */
+    private String requireTopicId(String topicId) {
+        String trimmed = topicId == null ? "" : topicId.trim();
+
+        if (trimmed.isEmpty()) {
+            return null;
+        }
+
+        if (!commentTopicRepository.existsById(trimmed)) {
+            String known = commentTopicRepository.findAllByOrderByNameAsc().stream()
+                .map(CommentTopic::getName)
+                .collect(Collectors.joining(", "));
+
+            throw new BusinessRuleViolationException(
+                "There is no comment topic '" + trimmed + "'. "
+                + (known.isEmpty() ? "This installation has none yet." : "The ones there are: " + known + "."));
+        }
+
+        return trimmed;
+    }
+
+    /**
+     * The comment this one may answer — null when it answers nothing, refused when it may not (TSSR-26).
+     *
+     * <p>Two checks, and each closes a different hole:
+     *
+     * <ul>
+     *   <li><strong>Same issue.</strong> Without it a reply becomes a link between two issues that
+     *       nothing in the product would ever draw, and one of them would render a thread whose parent
+     *       it does not hold.
+     *   <li><strong>The parent has no parent.</strong> This is the depth cap, and it lives here because
+     *       no column constraint can say it. A tracker is not a forum: nesting without a bound produces
+     *       a shape nobody can scan or quote from.
+     * </ul>
+     */
+    private String requireAnswerableParent(String parentCommentId, String issueId) {
+        String trimmed = parentCommentId == null ? "" : parentCommentId.trim();
+
+        if (trimmed.isEmpty()) {
+            return null;
+        }
+
+        Comment parent = requireComment(trimmed, issueId);
+
+        if (parent.getParentCommentId() != null) {
+            throw new BusinessRuleViolationException(
+                "That comment is itself a reply, and replies go one level deep. Answer the comment it "
+                + "replies to instead.");
+        }
+
+        return parent.getId();
     }
 
     private Issue requireIssue(String issueId) {

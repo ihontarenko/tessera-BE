@@ -78,6 +78,21 @@ public class SprintService {
     public SprintSummary create(Jwt jwt, String projectId, CreateSprintRequest request) {
         requireSprintManager(jwt, projectId);
 
+        return create(projectId, request);
+    }
+
+    /**
+     * The same, for a caller that is not an HTTP request — see {@link #list(String)}.
+     *
+     * <p>⚠️ <strong>It takes no caller, and that is not an omission.</strong> A sprint records no creator
+     * — {@link Sprint} has no such column — so a caller parameter here would be one nothing reads. Who
+     * may do this is settled before this runs, by the annotation on {@code SprintController} or by the
+     * tool dispatcher's gate.
+     */
+    @Transactional
+    public SprintSummary create(String projectId, CreateSprintRequest request) {
+        projectService.requireProject(projectId);
+
         Sprint sprint = sprintRepository.save(Sprint.builder()
             .id(idGenerator.get())
             .projectId(projectId)

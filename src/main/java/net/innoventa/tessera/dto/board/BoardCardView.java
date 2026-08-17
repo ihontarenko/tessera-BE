@@ -34,6 +34,15 @@ public record BoardCardView(
     String assigneeId,
     String priorityId,
     String epicKey,
+    /**
+     * Whether something unresolved is holding this card up (TSSR-41).
+     *
+     * ⚠️ A flag, not the keys — unlike {@code IssueResponse.blockedBy}. A board is the screen where
+     * somebody decides what to pick up, and that decision needs "not this one", not a list to read. The
+     * keys are one click away on the issue itself, and fetching them for every card on a board would be
+     * a query per card for something nobody reads at this size.
+     */
+    boolean blocked,
     LocalDateTime resolvedAt
 ) {
 }

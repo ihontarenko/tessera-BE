@@ -33,6 +33,16 @@ import java.time.LocalDateTime;
 @EqualsAndHashCode(of = "id")
 public class Issue {
 
+    /**
+     * The longest description this tracker accepts, in characters.
+     *
+     * <p>MySQL's {@code TEXT} holds 65535 <strong>bytes</strong> and a utf8mb4 character can take four
+     * of them, so 16000 characters cannot overflow the column whatever alphabet they are written in
+     * (16000 × 4 = 64000). The number is derived, not chosen — do not round it up without changing the
+     * column type first.
+     */
+    public static final int MAXIMUM_DESCRIPTION_LENGTH = 16_000;
+
     @Id
     @Column(length = 36, nullable = false)
     private String id;
@@ -51,7 +61,15 @@ public class Issue {
     @Column(nullable = false, length = 255)
     private String summary;
 
-    @Column(length = 4000)
+    /**
+     * ⚠️ {@code TEXT}, not a bounded {@code VARCHAR} — a description holds prose, and the first thing
+     * anybody put in one was a spec (TSSR-1).
+     *
+     * <p>The ceiling is {@link #MAXIMUM_DESCRIPTION_LENGTH}, enforced by the request DTOs rather than by
+     * the column, because MySQL's {@code TEXT} counts <em>bytes</em> and validation counts characters —
+     * a column-shaped limit would accept 20000 ASCII characters and refuse 20000 Cyrillic ones.
+     */
+    @Column(columnDefinition = "TEXT")
     private String description;
 
     @Column(name = "issue_type_id", nullable = false, length = 36)
@@ -74,6 +92,27 @@ public class Issue {
      */
     @Column(name = "resolved_at")
     private LocalDateTime resolvedAt;
+
+    /**
+     * When somebody put this issue away (TSSR-4); null while it is still in view.
+     *
+     * <p><strong>A second axis, independent of {@code resolutionId}.</strong> Resolved says the work
+     * finished; archived says it has stopped being interesting to look at. An archived issue leaves the
+     * board, the backlog and the project's issue list at once, and is still found by search and still
+     * listed on the Shipped screen — it is put away, not deleted.
+     *
+     * <p>⚠️ <strong>Only a closed issue can be archived</strong> ({@code resolutionId != null}), and
+     * <strong>reopening un-archives</strong> — {@link net.innoventa.tessera.service.TransitionService}
+     * clears this on the way out of a DONE status, in the same breath as the resolution. Without that,
+     * an issue could be open and invisible at once, which is the one state nothing in the product could
+     * explain.
+     */
+    @Column(name = "archived_at")
+    private LocalDateTime archivedAt;
+
+    /** Who put it away — null exactly when {@link #archivedAt} is. */
+    @Column(name = "archived_by_member_id", length = 36)
+    private String archivedByMemberId;
 
     @Column(name = "reporter_member_id", nullable = false, length = 36)
     private String reporterMemberId;

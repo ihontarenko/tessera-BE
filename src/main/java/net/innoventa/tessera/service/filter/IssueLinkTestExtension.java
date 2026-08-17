@@ -15,9 +15,9 @@ import java.util.function.Predicate;
  * The link-aware half of ADR-0008's processor surface — {@code issue is blocked},
  * {@code issue is blocks('TIC-42')}, {@code issue is linkedTo('Relates')}.
  * <p>
- * These live here rather than in jMouse-EL because "blocked" is a Tessera fact, not a language one:
- * it means an <em>inward</em> {@link #BLOCKS_LINK_TYPE} link, a reading that depends on this product's
- * link model. The ADR's rule that heavier logic ships as a registered test rather than as
+ * These live here rather than in jMouse-EL because "blocked" is a Tessera fact, not a language one: it
+ * means an <em>inward</em> link whose type carries a blocking effect, a reading that depends on this
+ * product's link model. The ADR's rule that heavier logic ships as a registered test rather than as
  * {@code @bean} reach is exactly what this is — the expression names a question, and the answer is
  * implemented in Java where we control it.
  * <p>
@@ -26,20 +26,24 @@ import java.util.function.Predicate;
  */
 public class IssueLinkTestExtension implements Extension {
 
-    /** The seeded link type whose inward half is what "blocked" means. */
-    static final String BLOCKS_LINK_TYPE = "Blocks";
-
     @Override
     public List<Test> getTests() {
         return List.of(new BlockedTest(), new BlocksTest(), new LinkedToTest());
     }
 
-    /** {@code issue is blocked} — something on the other end of an inward Blocks link is holding it up. */
+    /**
+     * {@code issue is blocked} — something on the other end of an inward blocking link is holding it up.
+     *
+     * <p>⚠️ <strong>Decided by the link type's effect, not by its name</strong> (TSSR-40). This compared
+     * the name against the literal {@code "Blocks"}, which stopped being true the moment anybody renamed
+     * the row and could never be true for a second blocking type somebody added. There is one definition
+     * of blocking now and it is the column.
+     */
     private static final class BlockedTest extends IssueLinkTest {
 
         @Override
         protected Predicate<LinkReference> matcher(Arguments arguments, EvaluationContext context) {
-            return link -> BLOCKS_LINK_TYPE.equals(link.type()) && LinkReference.INWARD.equals(link.direction());
+            return link -> link.blocking() && LinkReference.INWARD.equals(link.direction());
         }
 
         @Override
@@ -56,7 +60,7 @@ public class IssueLinkTestExtension implements Extension {
         protected Predicate<LinkReference> matcher(Arguments arguments, EvaluationContext context) {
             String blockedKey = argument(arguments, context);
 
-            return link -> BLOCKS_LINK_TYPE.equals(link.type())
+            return link -> link.blocking()
                 && LinkReference.OUTWARD.equals(link.direction())
                 && link.issueKey().equals(blockedKey);
         }

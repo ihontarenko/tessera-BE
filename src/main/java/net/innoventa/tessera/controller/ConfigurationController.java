@@ -6,6 +6,7 @@ import net.innoventa.tessera.dto.configuration.ConfigurationResponse;
 import net.innoventa.tessera.dto.configuration.IssueTypeResponse;
 import net.innoventa.tessera.dto.configuration.IssueTypeSchemeResponse;
 import net.innoventa.tessera.dto.configuration.PriorityResponse;
+import net.innoventa.tessera.dto.configuration.CommentTopicResponse;
 import net.innoventa.tessera.dto.configuration.ResolutionResponse;
 import net.innoventa.tessera.dto.configuration.StatusResponse;
 import net.innoventa.tessera.dto.configuration.WorkflowResponse;
@@ -70,6 +71,11 @@ public class ConfigurationController {
     @GetMapping("/resolutions")
     public List<ResolutionResponse> resolutions() {
         return configurationService.resolutions();
+    }
+
+    @GetMapping("/comment-topics")
+    public List<CommentTopicResponse> commentTopics() {
+        return configurationService.commentTopics();
     }
 
     @GetMapping("/workflows")

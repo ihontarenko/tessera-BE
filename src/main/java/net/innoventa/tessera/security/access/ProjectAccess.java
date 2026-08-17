@@ -141,7 +141,22 @@ public class ProjectAccess {
      * installation's catalogue would offer too much, and a grant beyond the owner resolves to nothing.
      */
     public boolean holdsAnywhere(Member member, String permission) {
-        return !visibilityScopes.of(subjectOf(member), permission).seesNothing();
+        return holdsAnywhere(subjectOf(member), permission);
+    }
+
+    /**
+     * The same, for a subject that may be an agent — see {@link #holds(Subject, String, String)}.
+     *
+     * <p>⚠️ <strong>This overload is what a scope-free gate has to ask, and its absence was a bug.</strong>
+     * {@code TesseraToolAuthorizer.permits} used to iterate {@link #visibleProjectIds(Subject)} instead,
+     * which answers a narrower question than it looks: a subject holding the permission installation-wide
+     * gets an empty list — see the warning on {@code visibleProjectIds} — so an empty stream refused every
+     * MCP action for a caller who genuinely held the permission everywhere. Asking about breadth rather
+     * than about places gets the {@code EVERYTHING} case right, and costs one query rather than one per
+     * project.
+     */
+    public boolean holdsAnywhere(Subject subject, String permission) {
+        return !visibilityScopes.of(subject, permission).seesNothing();
     }
 
     /** Whether this member browses every project there is, which no list of identifiers can express. */

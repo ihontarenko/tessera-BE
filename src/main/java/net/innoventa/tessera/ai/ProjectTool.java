@@ -104,10 +104,16 @@ public class ProjectTool implements ToolDefinition {
 
     /**
      * ⚠️ <strong>Not scope-confined, and it cannot be:</strong> there is no project yet to be confined
-     * to. It is the one action here that writes, and the only permission it can honestly declare is the
-     * one every read declares — because Tessera has never gated creating a project on anything but being
-     * signed in, and inventing a permission during a cutover would be a new rule wearing a refactor's
-     * clothes.
+     * to. It is therefore gated by the scope-free question alone, which is why the permission it declares
+     * has to mean something installation-wide.
+     *
+     * <p>⚠️ <strong>It used to declare {@link Permissions#BROWSE_PROJECT}</strong> — the only permission
+     * it could honestly borrow, on the reasoning that inventing one during a cutover would be a new rule
+     * wearing a refactor's clothes. The borrowing had a consequence nobody intended: {@code
+     * project:browse} is carried by the three {@code @PROJECT} roles and by nothing else, so creating a
+     * project through this tool required already belonging to one and a person who belonged to none could
+     * never create their first. {@link Permissions#CREATE_PROJECT} is the honest name for what this costs,
+     * and the note on it explains why the HTTP route deliberately stays open to any signed-in caller.
      *
      * <p>Confirmed, though. A project is the one thing in this product that cannot be deleted through
      * any surface at all, so a mistaken one is permanent — which is a stronger argument for asking than
@@ -130,8 +136,11 @@ public class ProjectTool implements ToolDefinition {
                         .optionalBoolean("plansInSprints",
                                 "True for a Scrum project — a backlog, sprints and a sprint-scoped "
                               + "board. False or omitted for a board of everything.")
+                        .optionalString("icon",
+                                "One emoji standing for the project in every list — 🚀, 📦. Omit for "
+                              + "none; anything that is not a single emoji is refused.")
                         .confirm())
-                .requiredPermission(Permissions.BROWSE_PROJECT)
+                .requiredPermission(Permissions.CREATE_PROJECT)
                 .handler(this::handleCreate)
                 .build();
     }
@@ -149,7 +158,8 @@ public class ProjectTool implements ToolDefinition {
                         planning,
                         // The lead is the creator unless somebody says otherwise, and saying otherwise
                         // needs a member identifier a model has no way to know. It is a screen's job.
-                        null));
+                        null,
+                        invocation.optionalString("icon").orElse(null)));
 
         Map<String, Object> answer = new LinkedHashMap<>(describe(created));
 
@@ -168,6 +178,10 @@ public class ProjectTool implements ToolDefinition {
 
         described.put("key",  project.key());
         described.put("name", project.name());
+
+        if (project.icon() != null) {
+            described.put("icon", project.icon());
+        }
 
         if (project.lead() != null) {
             described.put("lead", project.lead().displayName());

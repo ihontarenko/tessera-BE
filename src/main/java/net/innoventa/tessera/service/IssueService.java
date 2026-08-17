@@ -110,7 +110,7 @@ public class IssueService {
         activityLogService.record(issue.getId(), caller.getId(),
             activityLogService.changeSet().added(FIELD_CREATED, issue.getIssueKey()));
 
-        return issueAssembler.detail(issue, project);
+        return issueAssembler.detail(issue, project, caller);
     }
 
     @Transactional(readOnly = true)
@@ -144,7 +144,10 @@ public class IssueService {
     ) {
         projectService.requireProject(projectId);
 
-        List<Issue> issues = issueRepository.findByProjectIdOrderByRankAsc(projectId).stream()
+        // Archived issues are out of the project's list (TSSR-4). This listing has no "show archived"
+        // switch on purpose: the Shipped screen is where put-away work is read, and search is where it is
+        // found — a third answer here would be a second archive screen nobody asked for.
+        List<Issue> issues = issueRepository.findByProjectIdAndArchivedAtIsNullOrderByRankAsc(projectId).stream()
             .filter(issue -> statusId == null || statusId.equals(issue.getStatusId()))
             .filter(issue -> assigneeMemberId == null || assigneeMemberId.equals(issue.getAssigneeMemberId()))
             .filter(issue -> issueTypeId == null || issueTypeId.equals(issue.getIssueTypeId()))
@@ -156,9 +159,7 @@ public class IssueService {
 
     @Transactional(readOnly = true)
     public IssueResponse get(Jwt jwt, String issueId) {
-        memberService.resolveMember(jwt);
-
-        return detail(requireIssue(issueId));
+        return detail(requireIssue(issueId), memberService.resolveMember(jwt));
     }
 
     /**
@@ -169,34 +170,34 @@ public class IssueService {
      */
     @Transactional(readOnly = true)
     public IssueResponse getByKey(Jwt jwt, String issueKey) {
-        memberService.resolveMember(jwt);
-
-        return getByKey(issueKey);
+        return getByKey(issueKey, memberService.resolveMember(jwt));
     }
 
     /**
      * The same, for a caller that is not an HTTP request.
      *
-     * <p>⚠️ <strong>No caller parameter, for the reason {@link #list} has none:</strong> an issue reads
-     * the same to everybody who may read it at all, and who that is has already been decided — by
-     * {@code @RequiresAccess} on the route, or by the dispatcher on a tool call.
+     * <p>⚠️ <strong>It takes a caller now, and it used not to</strong> (TSSR-43). The old reasoning was
+     * that an issue reads the same to everybody who may read it at all, since who that is had already
+     * been decided by {@code @RequiresAccess} or by the tool dispatcher. That held while every reference
+     * an issue carried lived in its own project. Links do not: a tracking hub names work anywhere, so
+     * part of this answer now depends on which projects the reader belongs to.
      */
     @Transactional(readOnly = true)
-    public IssueResponse getByKey(String issueKey) {
+    public IssueResponse getByKey(String issueKey, Member caller) {
         Issue issue = issueRepository.findByIssueKey(issueKey.toUpperCase(Locale.ROOT))
             .orElseThrow(() -> new ResourceNotFoundException("Issue not found: " + issueKey));
 
-        return detail(issue);
+        return detail(issue, caller);
     }
 
     /**
      * Both reads end the same way, and deliberately share it rather than each writing it out: whichever
      * way an issue is addressed, the answer is assembled once.
      */
-    private IssueResponse detail(Issue issue) {
+    private IssueResponse detail(Issue issue, Member caller) {
         Project project = projectService.requireProject(issue.getProjectId());
 
-        return issueAssembler.detail(issue, project);
+        return issueAssembler.detail(issue, project, caller);
     }
 
     @Transactional
@@ -232,7 +233,7 @@ public class IssueService {
 
         activityLogService.record(issue.getId(), caller.getId(), changes);
 
-        return issueAssembler.detail(issue, project);
+        return issueAssembler.detail(issue, project, caller);
     }
 
     @Transactional

@@ -8,7 +8,6 @@ import net.innoventa.tessera.dto.issue.IssueRowResponse;
 import net.innoventa.tessera.dto.issue.IssueSearchResponse;
 import net.innoventa.tessera.repository.IssueRepository;
 import net.innoventa.tessera.repository.ProjectRepository;
-import net.innoventa.tessera.security.access.ProjectAccess;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -45,7 +44,7 @@ public class IssueSearchService {
 
     private final IssueRepository issueRepository;
     private final ProjectRepository projectRepository;
-    private final ProjectAccess projectAccess;
+    private final BrowsableProjects browsableProjects;
     private final MemberService memberService;
     private final IssueAssembler issueAssembler;
 
@@ -57,14 +56,22 @@ public class IssueSearchService {
         String statusId,
         String assigneeMemberId,
         boolean openOnly,
+        boolean includeArchived,
         int page,
         int size
     ) {
         return search(memberService.resolveMember(jwt), text, projectId, statusId, assigneeMemberId,
-            openOnly, page, size);
+            openOnly, includeArchived, page, size);
     }
 
-    /** The same, for a caller that is not an HTTP request — see {@code ProjectService.list(Member)}. */
+    /**
+     * The same, for a caller that is not an HTTP request — see {@code ProjectService.list(Member)}.
+     *
+     * @param includeArchived whether work that has been put away is in the answer (TSSR-4). Search is the
+     *                        one read where archived issues stay reachable at all: an archive nothing can
+     *                        find again is a delete with extra steps, so this defaults to false at the
+     *                        edges rather than being unavailable.
+     */
     public IssueSearchResponse search(
         Member caller,
         String text,
@@ -72,10 +79,11 @@ public class IssueSearchService {
         String statusId,
         String assigneeMemberId,
         boolean openOnly,
+        boolean includeArchived,
         int page,
         int size
     ) {
-        List<String> browsableProjectIds = browsableProjectIds(caller);
+        List<String> browsableProjectIds = browsableProjects.idsFor(caller);
 
         int pageNumber = Math.max(page, 0);
         int pageSize = Math.clamp(size <= 0 ? DEFAULT_PAGE_SIZE : size, 1, MAXIMUM_PAGE_SIZE);
@@ -92,6 +100,7 @@ public class IssueSearchService {
             blankToNull(statusId),
             blankToNull(assigneeMemberId),
             openOnly,
+            includeArchived,
             likePattern(text),
             PageRequest.of(pageNumber, pageSize, Sort.by(Sort.Direction.DESC, "updatedAt"))
         );
@@ -108,28 +117,6 @@ public class IssueSearchService {
             .toList();
 
         return new IssueSearchResponse(items, pageNumber, pageSize, found.getTotalElements());
-    }
-
-    /**
-     * The projects this member may browse.
-     *
-     * <p><strong>One question now, where it used to be two.</strong> It read the membership table and
-     * then asked, project by project, whether {@code BROWSE_PROJECT} survived an override there — a walk
-     * whose cost grew with how many projects somebody belonged to. The visibility scope answers the same
-     * thing in one resolution: which places the permission is held at, deny already subtracted. Membership
-     * is not a separate condition any more, because holding nothing at a project <em>is</em> not being in
-     * it.
-     *
-     * <p>⚠️ An installation-wide grant reads as "every project" and cannot be a list, so it is asked
-     * about separately — see {@code ProjectAccess.browsesEveryProject}. Nobody holds one today, and a
-     * search that silently returned nothing for the first person who did would be a bug found late.
-     */
-    private List<String> browsableProjectIds(Member caller) {
-        if (projectAccess.browsesEveryProject(caller)) {
-            return projectRepository.findAll().stream().map(Project::getId).toList();
-        }
-
-        return projectAccess.visibleProjectIds(caller);
     }
 
     private IssueSearchResponse.Item toItem(IssueRowResponse row, Project project) {

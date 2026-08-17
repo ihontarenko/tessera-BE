@@ -70,6 +70,25 @@ final class CatalogRules {
             usage);
     }
 
+    /**
+     * An optional field as it is stored: trimmed, and {@code null} when there is nothing there.
+     *
+     * <p>⚠️ <strong>An empty string is not the same value as null, and only one of them means
+     * "default".</strong> A cleared input posts {@code ""}, which would store as a colour that renders
+     * as nothing, or an icon key no drawing answers to. Emptiness is decided once, here, instead of at
+     * each of the places that later ask "is there one?".
+     *
+     * <p>It validates no <em>shape</em>, deliberately. A colour column holds a CSS colour, and
+     * {@code #8b5cf6}, {@code rebeccapurple} and {@code hsl(258 90% 66%)} are all one; a check that
+     * recognised only the hex spelling would refuse valid values while still passing {@code #zzzzzz}.
+     * An icon key does have a closed list, and that check belongs with the list rather than here.
+     */
+    static String storedOptional(String value) {
+        String trimmed = value == null ? "" : value.trim();
+
+        return trimmed.isEmpty() ? null : trimmed;
+    }
+
     /** A name that is only whitespace is not a name; it would render as a blank row nobody can pick. */
     static String requireName(String name, String catalog) {
         String trimmed = name == null ? "" : name.trim();

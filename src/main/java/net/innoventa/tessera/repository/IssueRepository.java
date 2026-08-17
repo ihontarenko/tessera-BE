@@ -16,6 +16,25 @@ public interface IssueRepository extends JpaRepository<Issue, String> {
     List<Issue> findByProjectIdOrderByRankAsc(String projectId);
 
     /**
+     * The project's issues that are still <em>in view</em> — everything above minus what has been put
+     * away (TSSR-4). The board, the backlog and the project's issue list all read through this one
+     * finder, which is what makes archiving leave every view at once instead of each screen growing its
+     * own idea of what to hide.
+     */
+    List<Issue> findByProjectIdAndArchivedAtIsNullOrderByRankAsc(String projectId);
+
+    /**
+     * A project's finished work, newest first — what the Shipped screen is a view of.
+     *
+     * <p>Closed is {@code resolution IS NULL} inverted (ADR-0004), never a status name, and ordering is
+     * by {@code resolvedAt} rather than {@code updatedAt}: this list answers <em>when did we deliver
+     * it</em>, and a typo fixed last week must not push a March issue to the top. Archived and
+     * unarchived alike — putting something away is what removes it from the other screens, not from the
+     * record of what shipped.
+     */
+    List<Issue> findByProjectIdAndResolutionIdIsNotNullOrderByResolvedAtDesc(String projectId);
+
+    /**
      * The cross-project search (ticket 10). {@code projectIds} is the set the caller may browse, resolved
      * before this is called and never widened here — every other argument only narrows it further, so a
      * filter can never become a way to see more (ADR-0008). Paged in the database rather than in memory:
@@ -28,6 +47,7 @@ public interface IssueRepository extends JpaRepository<Issue, String> {
           and (:statusId is null or issue.statusId = :statusId)
           and (:assigneeMemberId is null or issue.assigneeMemberId = :assigneeMemberId)
           and (:openOnly = false or issue.resolutionId is null)
+          and (:includeArchived = true or issue.archivedAt is null)
           and (:text is null or lower(issue.summary) like :text or lower(issue.issueKey) like :text)
         """)
     Page<Issue> search(
@@ -37,7 +57,51 @@ public interface IssueRepository extends JpaRepository<Issue, String> {
         @Param("assigneeMemberId") String assigneeMemberId,
         /** Open is {@code resolution IS NULL} — the invariant, not a status name (ADR-0004). */
         @Param("openOnly") boolean openOnly,
+        /**
+         * Archived issues are out of the answer unless asked for (TSSR-4). Search is the one place they
+         * stay reachable — putting something away must not make it unfindable, or nobody would ever do it.
+         */
+        @Param("includeArchived") boolean includeArchived,
         @Param("text") String text,
+        Pageable pageable
+    );
+
+    /**
+     * The issues that gather other issues — every one that is the <em>source</em> of a link (TSSR-45).
+     *
+     * <p>⚠️ <strong>"Register" is a shape, not a kind of issue.</strong> There is no hub entity and no
+     * column saying an issue is one — TSSR-43 turned that option down deliberately — so this asks the only
+     * question the schema can answer: does anything hang off this issue. An installation that never links
+     * anything gets an empty page rather than a screen explaining a concept it does not use.
+     *
+     * <p>⚠️ <strong>Optionally one link type, and never a link type <em>name</em>.</strong> The caller
+     * passes an identifier or nothing; which type means "gathers an effort" is the interface's default and
+     * the reader's choice, not a fact this query knows. TSSR-40 is the receipt for why: {@code is blocked}
+     * compared a name against the literal {@code "Blocks"} and stopped being true when somebody renamed
+     * the row.
+     *
+     * <p>⚠️ <strong>One end at a time, and which end is the caller's question.</strong> A link is stored
+     * once as {@code source → target} and reads as two different statements — <em>this issue gathers those</em>
+     * and <em>this issue is gathered by those</em>. Mixing them produced a list where an issue appeared twice
+     * for one link, once at each end, which is the same fact pretending to be two. So {@code inward} picks
+     * the side rather than the answer holding both.
+     */
+    @Query("""
+        select issue from Issue issue
+        where issue.projectId in :projectIds
+          and issue.archivedAt is null
+          and exists (
+            select link.id from IssueLink link
+            where ((:inward = false and link.sourceIssueId = issue.id)
+                or (:inward = true and link.targetIssueId = issue.id))
+              and (:linkTypeId is null or link.linkTypeId = :linkTypeId)
+          )
+        """)
+    Page<Issue> findRegisters(
+        @Param("projectIds") Collection<String> projectIds,
+        @Param("linkTypeId") String linkTypeId,
+        /** Which end this issue is: {@code false} the one that gathers, {@code true} the one gathered. */
+        @Param("inward") boolean inward,
         Pageable pageable
     );
 

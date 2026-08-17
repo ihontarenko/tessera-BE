@@ -101,7 +101,14 @@ class BoardServiceFilterTest {
 
         // The permission-gated query: only the project the caller may browse. The other project's issue
         // exists in the repository and is deliberately never returned by it.
-        when(issueRepository.findByProjectIdOrderByRankAsc(VISIBLE_PROJECT)).thenReturn(List.of(visibleIssue));
+        //
+        // ⚠️ The archived-excluding variant, because that is what the board reads (TSSR-4) — archived work
+        // leaves the board whatever the scope strategy. Stubbing the older `findByProjectIdOrderByRankAsc`
+        // left the mock answering an empty list, and every assertion here then passed its own check
+        // vacuously while failing on the count: a board with no cards cannot hydrate an issue outside the
+        // caller's scope either.
+        when(issueRepository.findByProjectIdAndArchivedAtIsNullOrderByRankAsc(VISIBLE_PROJECT))
+            .thenReturn(List.of(visibleIssue));
     }
 
     @Test

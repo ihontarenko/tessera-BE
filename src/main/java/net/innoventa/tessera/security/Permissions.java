@@ -36,6 +36,24 @@ public final class Permissions {
     /** See the project and its issues. The permission every read in a project is gated on. */
     public static final String BROWSE_PROJECT = "project:browse";
 
+    /**
+     * Raise a new project.
+     *
+     * <p>⚠️ <strong>Installation-wide, because there is no project yet to scope it to.</strong> Every
+     * other permission here answers "may you do this <em>here</em>"; this one cannot, and that is exactly
+     * why it had to exist. {@code projects_create} declared {@link #BROWSE_PROJECT} instead — the only
+     * permission it could honestly borrow — and the borrowing made it unreachable: {@code project:browse}
+     * is carried by the three {@code @PROJECT} roles and by nothing else, so creating a project required
+     * already belonging to one. A person who belonged to none could never create their first.
+     *
+     * <p>⚠️ <strong>The HTTP route is deliberately not gated on this.</strong> {@code ProjectController}
+     * asks for nothing but a signed-in caller and keeps doing so — narrowing a screen people already use
+     * would be a new rule smuggled in as a fix. The two surfaces differ on purpose: a project cannot be
+     * deleted through any surface at all, so a mistaken one is permanent, and a conversation is the
+     * surface where a mistaken one is likeliest.
+     */
+    public static final String CREATE_PROJECT = "project:create";
+
     public static final String CREATE_ISSUE = "issue:create";
     public static final String EDIT_ISSUE = "issue:edit";
     public static final String ASSIGN_ISSUE = "issue:assign";
@@ -51,6 +69,36 @@ public final class Permissions {
     public static final String ADD_COMMENT = "comment:write";
 
     public static final String MANAGE_SPRINT = "sprint:manage";
+
+    /**
+     * Read the project's wiki (TSSR-16).
+     *
+     * <p>⚠️ <strong>Its own permission rather than {@link #BROWSE_PROJECT}</strong>, and the reason is
+     * that a wiki is not a view of the issues. Everything {@code project:browse} covers is the work
+     * itself; a wiki is prose beside it — a runbook, a set of credentials-adjacent conventions, a
+     * decision that outlived its ticket — and an installation that wants a contractor on the board and
+     * not in the handbook has nowhere to say so if the two are one permission. Every project role
+     * carries both today, so nothing is narrowed by its existence; what it buys is the ability to take
+     * one away.
+     */
+    public static final String READ_PAGE = "page:read";
+
+    /** Write, rename, re-file and remove wiki pages. ⚠️ Deleting one is permanent — there is no history. */
+    public static final String WRITE_PAGE = "page:write";
+
+    /**
+     * Edit the project's category tree — the sections the wiki (and later anything else) is filed into.
+     *
+     * <p>⚠️ <strong>Not {@link #WRITE_PAGE}, on purpose.</strong> The tree is deliberately agnostic: it
+     * holds pages today and is built so a second kind of content costs a constant (TSSR-15). Gating it on
+     * the wiki's permission would tie the general thing to its first consumer, and the second consumer
+     * would then arrive needing {@code page:write} to make a folder for files.
+     *
+     * <p>⚠️ And not {@link #ADMINISTER_PROJECT} either, which is the other tempting answer. Making a
+     * section is part of writing a wiki, not part of administering a project; requiring an administrator
+     * for it would mean every new page either lands at the root or waits on somebody else.
+     */
+    public static final String MANAGE_CATEGORY = "category:manage";
 
     /** Settings, membership, roles and personal overrides — the project's own administration. */
     public static final String ADMINISTER_PROJECT = "project:administer";
@@ -112,6 +160,7 @@ public final class Permissions {
 
     private static final List<String> ALL = List.of(
             BROWSE_PROJECT,
+            CREATE_PROJECT,
             CREATE_ISSUE,
             EDIT_ISSUE,
             ASSIGN_ISSUE,
@@ -119,6 +168,9 @@ public final class Permissions {
             DELETE_ISSUE,
             ADD_COMMENT,
             MANAGE_SPRINT,
+            READ_PAGE,
+            WRITE_PAGE,
+            MANAGE_CATEGORY,
             ADMINISTER_PROJECT,
             ADMINISTER_ACCESS,
             ADMINISTER_CONFIGURATION,

@@ -81,6 +81,7 @@ public class StatusWriteService {
             .id(idGenerator.get())
             .name(name)
             .category(request.category())
+            .color(CatalogRules.storedOptional(request.color()))
             .build());
 
         LOGGER.info("Status '{}' created in category {} — it belongs to no workflow until a transition "
@@ -113,6 +114,7 @@ public class StatusWriteService {
 
         status.setName(name);
         status.setCategory(request.category());
+        status.setColor(CatalogRules.storedOptional(request.color()));
 
         return toResponse(status);
     }
@@ -233,6 +235,7 @@ public class StatusWriteService {
             .id(status.getId())
             .name(status.getName())
             .category(proposedCategory)
+            .color(status.getColor())
             .build();
     }
 
@@ -241,7 +244,7 @@ public class StatusWriteService {
     }
 
     private static StatusResponse toResponse(Status status) {
-        return new StatusResponse(status.getId(), status.getName(), status.getCategory());
+        return new StatusResponse(status.getId(), status.getName(), status.getCategory(), status.getColor());
     }
 
 }

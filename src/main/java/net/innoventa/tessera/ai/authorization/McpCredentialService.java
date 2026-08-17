@@ -11,6 +11,8 @@ import org.jmouse.ai.agent.AgentAuthority;
 import org.jmouse.ai.agent.AgentConnection;
 import org.jmouse.ai.agent.AgentConnections;
 import org.jmouse.ai.agent.AgentDirectory;
+import org.jmouse.ai.agent.AgentEnrolment;
+import org.jmouse.ai.mcp.authorization.server.ApprovingSubject;
 import org.jmouse.ai.mcp.authorization.AuthorizationRoutes;
 import org.jmouse.ai.mcp.authorization.McpAuthorizationException;
 import org.springframework.security.oauth2.jose.jws.MacAlgorithm;
@@ -124,25 +126,62 @@ public class McpCredentialService {
     }
 
     /**
-     * Records a new connection for a person and answers with the pair it is worth.
+     * Records a new connection against the agent a person chose, and answers with the pair it is worth.
      *
-     * <p>⚠️ <strong>The agent is found before it is created</strong>, keyed on the client's own name. A
-     * person reconnecting the same client twice gets a second connection under the persona they already
-     * have — not a second "Claude Code" beside the first, which would split the permissions somebody set
-     * and give them two switches where they wanted one.
+     * <p>⚠️ <strong>Which agent that is, is the person's answer now and no longer this class's guess.</strong>
+     * It used to be derived here — three private methods that matched a registration, then a name, then
+     * created one — because the consent screen offered nothing to choose between. It offers the agents
+     * now, so the guess is only made for the choice that says <em>a new one</em>, and it is made by
+     * {@link AgentEnrolment}, which the other product reads too.
+     *
+     * <p>⚠️ <strong>Standing is checked here, at redemption, and not only at approval.</strong> Those are
+     * two requests minutes apart, and the only party whose standing matters is the one that actually
+     * turned up — an agent switched off in between gets a refusal rather than a credential.
      */
-    public IssuedCredential issueFor(Member member, String clientName) {
-        Agent  agent        = agentFor(member, clientName);
+    public IssuedCredential issueFor(Agent agent, String clientName, String clientId) {
+        AgentAdmission.refusalFor(agent, null, Instant.now()).ifPresent(refusal -> {
+            throw new McpAuthorizationException(refusal);
+        });
+
+        // ⚠️ The owner is read off the agent rather than carried in. The approval names an agent, and a
+        // second party naming its owner would be the same fact written twice — with a window in which a
+        // client could be handed a credential for somebody else's persona.
+        Member member = members.findById(agent.ownerReference())
+                .orElseThrow(() -> new McpAuthorizationException(
+                        "The member this agent acts for no longer exists. Nothing was changed."));
+
         String refreshToken = randomRefreshToken();
 
         AgentConnection connection = connections.open(
-                agent.id(), clientName, refreshToken, Instant.now().plus(settings.refreshTokenLifetime()));
+                agent.id(), clientName, clientId,
+                refreshToken, Instant.now().plus(settings.refreshTokenLifetime()));
 
         log.info("Opened MCP connection {} for agent {} ('{}') acting for member {}",
                 connection.id(), agent.id(), agent.name(), member.getId());
 
         return new IssuedCredential(
                 accessTokenFor(member, agent, connection), refreshToken, expiresInSeconds());
+    }
+
+    /**
+     * The agent an approval named, or the one it asked to have made.
+     *
+     * <p>⚠️ <strong>Created at redemption and not at approval</strong>, which is why the owner travels in
+     * the reference rather than being read off a session — there is no session here. An approval nobody
+     * comes back for therefore leaves no agent behind, and the row that does get written is one a client
+     * is about to hold a credential for.
+     *
+     * <p>⚠️ <strong>The reference is not trusted for naming an agent.</strong> The shared flow re-reads
+     * what this member may authorize and refuses anything outside it before this is ever called, which is
+     * what stands between a reference in a request body and somebody else's persona.
+     */
+    public Agent approvedAgent(String subjectReference, String clientName, String clientId) {
+        return ApprovingSubject.ownerOfNewSubject(subjectReference)
+                .map(ownerReference -> AgentEnrolment.agentFor(
+                        agents, connections, ownerReference, clientName, clientId))
+                .orElseGet(() -> agents.find(subjectReference).orElseThrow(() ->
+                        new McpAuthorizationException(
+                                "The agent this code was approved for no longer exists.")));
     }
 
     /**
@@ -272,23 +311,6 @@ public class McpCredentialService {
     }
 
     // ── Internal ──────────────────────────────────────────────────────────────────
-
-    /**
-     * The persona this client connects under, created on first sight.
-     *
-     * <p>⚠️ <strong>Born {@link AgentAuthority#INHERITED} and enabled</strong>, which is what keeps
-     * connecting a client a one-step act. The alternative — created restricted, and therefore able to do
-     * nothing until somebody grants it something — turns "approve" into "approve, then go and configure
-     * permissions", and the intervening state reads to its owner as a broken connection rather than as a
-     * deliberate one.
-     */
-    private Agent agentFor(Member member, String clientName) {
-        return agents.ownedBy(member.getId()).stream()
-                .filter(candidate -> candidate.name().equals(clientName))
-                .findFirst()
-                .orElseGet(() -> agents.register(new AgentDirectory.Draft(
-                        member.getId(), clientName, AgentAuthority.INHERITED, true)));
-    }
 
     private boolean isOwnedBy(AgentConnection connection, String memberId) {
         return agents.find(connection.agentId())

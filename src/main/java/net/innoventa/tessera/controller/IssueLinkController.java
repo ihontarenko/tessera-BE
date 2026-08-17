@@ -2,6 +2,7 @@ package net.innoventa.tessera.controller;
 
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
+import net.innoventa.tessera.dto.issue.ChangeIssueLinkTypeRequest;
 import net.innoventa.tessera.dto.issue.CreateIssueLinkRequest;
 import net.innoventa.tessera.dto.issue.IssueResponse;
 import net.innoventa.tessera.domain.Issue;
@@ -14,6 +15,7 @@ import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.web.bind.annotation.DeleteMapping;
 import org.springframework.web.bind.annotation.PathVariable;
 import org.springframework.web.bind.annotation.PostMapping;
+import org.springframework.web.bind.annotation.PutMapping;
 import org.springframework.web.bind.annotation.RequestBody;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
@@ -38,6 +40,23 @@ public class IssueLinkController {
         @Valid @RequestBody CreateIssueLinkRequest request
     ) {
         return issueLinkService.addLink(jwt, issueId, request);
+    }
+
+    /**
+     * Changing what an existing link is (TSSR-40) — the type, and nothing else.
+     *
+     * <p>⚠️ The body names only a link type on purpose. Changing an endpoint would be a different link,
+     * so it stays delete-and-create; a route that accepted one would look like an edit and behave like a
+     * replacement.
+     */
+    @PutMapping("/{linkId}")
+    public IssueResponse changeType(
+        @AuthenticationPrincipal Jwt jwt,
+        @PathVariable String issueId,
+        @PathVariable String linkId,
+        @Valid @RequestBody ChangeIssueLinkTypeRequest request
+    ) {
+        return issueLinkService.changeLinkType(jwt, issueId, linkId, request.linkTypeId());
     }
 
     @DeleteMapping("/{linkId}")

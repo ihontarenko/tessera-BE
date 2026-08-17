@@ -5,10 +5,17 @@ import org.springframework.data.jpa.repository.JpaRepository;
 
 import java.util.Collection;
 import java.util.List;
+import java.util.Optional;
 
 public interface ProjectRepository extends JpaRepository<Project, String> {
 
     boolean existsByKey(String key);
+
+    /**
+     * A project named the way people write it rather than by its identifier — what a live-data directive
+     * carries, since {@code :::board TSSR} is something somebody types into a page and a UUID is not.
+     */
+    Optional<Project> findByKey(String key);
 
     List<Project> findByIdInOrderByKeyAsc(List<String> ids);
 

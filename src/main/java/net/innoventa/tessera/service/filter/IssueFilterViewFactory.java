@@ -179,9 +179,11 @@ public class IssueFilterViewFactory {
                 continue;
             }
 
-            addLink(linksByIssue, link.getSourceIssueId(), linkType.getName(),
+            String effect = linkType.getEffect().name();
+
+            addLink(linksByIssue, link.getSourceIssueId(), linkType.getName(), effect,
                 IssueFilterView.LinkReference.OUTWARD, keysById.get(link.getTargetIssueId()), issueIds);
-            addLink(linksByIssue, link.getTargetIssueId(), linkType.getName(),
+            addLink(linksByIssue, link.getTargetIssueId(), linkType.getName(), effect,
                 IssueFilterView.LinkReference.INWARD, keysById.get(link.getSourceIssueId()), issueIds);
         }
 
@@ -192,6 +194,7 @@ public class IssueFilterViewFactory {
         Map<String, List<IssueFilterView.LinkReference>> linksByIssue,
         String issueId,
         String linkTypeName,
+        String effect,
         String direction,
         String farEndKey,
         Set<String> issueIds
@@ -202,7 +205,7 @@ public class IssueFilterViewFactory {
 
         linksByIssue
             .computeIfAbsent(issueId, key -> new ArrayList<>())
-            .add(new IssueFilterView.LinkReference(linkTypeName, direction, farEndKey));
+            .add(new IssueFilterView.LinkReference(linkTypeName, direction, farEndKey, effect));
     }
 
     /** Issue keys for both ends of the slice's links, including ends outside the board. */

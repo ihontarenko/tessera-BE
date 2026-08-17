@@ -29,6 +29,11 @@ import java.util.function.Supplier;
 @RequiredArgsConstructor
 public class ActivityLogService {
 
+    /** The longest snapshot a history item holds — {@code activity_log_items.old_value} / {@code new_value}. */
+    private static final int MAXIMUM_SNAPSHOT_LENGTH = 1024;
+
+    private static final String TRUNCATION_MARK = "…";
+
     private final ActivityLogRepository activityLogRepository;
     private final ActivityLogItemRepository activityLogItemRepository;
     private final Supplier<String> idGenerator;
@@ -60,10 +65,31 @@ public class ActivityLogService {
                 .id(idGenerator.get())
                 .activityLogId(event.getId())
                 .field(change.field())
-                .oldValue(change.oldValue())
-                .newValue(change.newValue())
+                .oldValue(snapshot(change.oldValue()))
+                .newValue(snapshot(change.newValue()))
                 .build());
         }
+    }
+
+    /**
+     * A value too long for a history item, shortened rather than allowed to fail the write.
+     *
+     * <p>⚠️ <strong>This is what stops a long field making its own issue uneditable</strong> (TSSR-1).
+     * A history value is a display string; the edit is somebody's actual work. Letting the first refuse
+     * the second is the wrong way round — and it failed in the most confusing way available, because
+     * the column that overflowed was not the column being written: an update to {@code description}
+     * came back as {@code Data too long for column 'new_value'}, with the description unchanged.
+     *
+     * <p>Truncating costs a reader an ellipsis in the History tab. Throwing cost them the edit. And it
+     * is done here, at the one recording seam, so it holds for every field rather than for the one that
+     * happened to be long first.
+     */
+    private static String snapshot(String value) {
+        if (value == null || value.length() <= MAXIMUM_SNAPSHOT_LENGTH) {
+            return value;
+        }
+
+        return value.substring(0, MAXIMUM_SNAPSHOT_LENGTH - TRUNCATION_MARK.length()) + TRUNCATION_MARK;
     }
 
     /** Remove an issue's entire history — its events and their items — when the issue is deleted. */

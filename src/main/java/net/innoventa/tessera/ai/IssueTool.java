@@ -7,18 +7,24 @@ import net.innoventa.tessera.domain.Project;
 import net.innoventa.tessera.domain.Status;
 import net.innoventa.tessera.domain.Transition;
 import net.innoventa.tessera.dto.comment.SaveCommentRequest;
+import net.innoventa.tessera.dto.issue.CreateIssueLinkRequest;
 import net.innoventa.tessera.dto.issue.CreateIssueRequest;
-import net.innoventa.tessera.dto.issue.IssueRef;
+import net.innoventa.tessera.dto.issue.IssueLinkView;
+import net.innoventa.tessera.dto.issue.IssueReference;
 import net.innoventa.tessera.dto.issue.IssueResponse;
 import net.innoventa.tessera.dto.issue.IssueRowResponse;
 import net.innoventa.tessera.dto.issue.TransitionOption;
 import net.innoventa.tessera.dto.issue.IssueSearchResponse;
+import net.innoventa.tessera.dto.issue.SetParentRequest;
 import net.innoventa.tessera.dto.issue.TransitionIssueRequest;
 import net.innoventa.tessera.dto.issue.UpdateIssueRequest;
 import net.innoventa.tessera.exception.BusinessRuleViolationException;
 import net.innoventa.tessera.repository.IssueRepository;
 import net.innoventa.tessera.security.Permissions;
 import net.innoventa.tessera.service.CommentService;
+import net.innoventa.tessera.security.access.ProjectAccess;
+import net.innoventa.tessera.service.IssueHierarchyService;
+import net.innoventa.tessera.service.IssueLinkService;
 import net.innoventa.tessera.service.IssueSearchService;
 import net.innoventa.tessera.service.IssueService;
 import net.innoventa.tessera.service.ProjectService;
@@ -35,6 +41,7 @@ import org.jmouse.ai.ToolRefusedException;
 import org.springframework.stereotype.Component;
 
 import java.util.LinkedHashMap;
+import java.util.Locale;
 import java.util.List;
 import java.util.Map;
 import java.util.stream.Collectors;
@@ -68,6 +75,9 @@ public class IssueTool implements ToolDefinition {
     private final WorkflowResolver   workflowResolver;
     private final ProjectService     projectService;
     private final IssueRepository    issueRepository;
+    private final IssueHierarchyService hierarchyService;
+    private final IssueLinkService   issueLinkService;
+    private final ProjectAccess      projectAccess;
     private final ToolMembers        members;
     private final ToolCatalogs       catalogs;
 
@@ -78,7 +88,8 @@ public class IssueTool implements ToolDefinition {
 
     @Override
     public List<ToolAction> actions() {
-        return List.of(search(), list(), get(), create(), update(), transition(), comment(), delete());
+        return List.of(search(), list(), get(), create(), update(), transition(), comment(),
+                       link(), unlink(), relink(), delete());
     }
 
     // ── The project's own list ───────────────────────────────────────────────────
@@ -141,8 +152,10 @@ public class IssueTool implements ToolDefinition {
                 .name("get")
                 .title("Read one issue")
                 .description("Reads one issue in full — its description, its status, who reported and "
-                           + "who it is assigned to, its labels and its links. Read this before "
-                           + "editing one, because an update replaces the fields it is given.")
+                           + "who it is assigned to, its labels, its links, and what is blocking it. "
+                           + "A link to an issue in a project you cannot browse shows its key only. "
+                           + "Read this before editing one, because an update replaces the fields it "
+                           + "is given.")
                 .inputSchema(ArgumentSchema.builder()
                         .scope(ProjectScopeResolver.KIND, "projects_list")
                         .requiredString("issueKey", "The issue to read, e.g. TES-42."))
@@ -156,7 +169,7 @@ public class IssueTool implements ToolDefinition {
     private Object handleGet(ToolInvocation invocation) {
         Issue issue = requireIssue(invocation, invocation.requiredString("issueKey"));
 
-        return describeInFull(issueService.getByKey(issue.getIssueKey()));
+        return describeInFull(issueService.getByKey(issue.getIssueKey(), members.actingSubject(invocation)));
     }
 
     /**
@@ -193,12 +206,36 @@ public class IssueTool implements ToolDefinition {
             described.put("parent", issue.parent().issueKey());
         }
         if (!issue.children().isEmpty()) {
-            described.put("children", issue.children().stream().map(IssueRef::issueKey).toList());
+            described.put("children", issue.children().stream().map(IssueReference::issueKey).toList());
+        }
+
+        // ⚠️ Links, at last, and the description had been promising them all along (TSSR-44). A missing
+        // field makes a model ask; a described field that never arrives makes it read the answer it was
+        // given, conclude the issue has none, and act on that.
+        //
+        // Grouped by LABEL rather than by type, the way the Relations panel groups them: a symmetric
+        // type says the same word both ways, while an asymmetric one reads "blocks" in one direction and
+        // "is blocked by" in the other — two different statements about this issue.
+        //
+        // ⚠️ Redacted entries stay redacted. The far end may be in a project the caller cannot browse,
+        // and `IssueAssembler` has already withheld its summary; reaching around that here would make
+        // the tool the more dangerous of the two clients.
+        if (!issue.links().isEmpty()) {
+            described.put("links", issue.links().stream().collect(Collectors.groupingBy(
+                    IssueLinkView::label,
+                    LinkedHashMap::new,
+                    Collectors.mapping(link -> link.issue().issueKey(), Collectors.toList()))));
         }
 
         described.put("canMoveTo", issue.availableTransitions().stream()
                 .map(TransitionOption::toStatusName)
                 .toList());
+
+        // Why canMoveTo is short, when it is. Without this an agent reads a missing transition and has
+        // no way to tell a workflow that forbids it from a blocker that will lift on its own.
+        if (!issue.blockedBy().isEmpty()) {
+            described.put("blockedBy", issue.blockedBy());
+        }
 
         return described;
     }
@@ -223,6 +260,10 @@ public class IssueTool implements ToolDefinition {
                                       + "project's default.")
                         .optionalString("priority", "Priority by name — High, Medium. Omit for the "
                                       + "lowest-ranked one.")
+                        .optionalString("parent", "The issue this one belongs under, by key — an epic "
+                                      + "for a story, a story for a sub-task. The parent's type must "
+                                      + "sit strictly higher in the hierarchy, and a parent that "
+                                      + "cannot hold this type is refused.")
                         .optionalNumber("storyPoints", "An estimate, where the team uses them.")
                         .confirm())
                 .requiredPermission(Permissions.CREATE_ISSUE)
@@ -246,7 +287,9 @@ public class IssueTool implements ToolDefinition {
                         // CREATE_ISSUE, and a tool that quietly needed a second permission would be
                         // refused for a reason its own description never mentioned.
                         null,
-                        null,
+                        // The parent, unlike the assignee, needs nothing beyond CREATE_ISSUE, so it is
+                        // accepted here rather than left to a second call.
+                        parentIdNamedBy(invocation),
                         invocation.optionalNumber("storyPoints").orElse(null)));
 
         Map<String, Object> answer = new LinkedHashMap<>();
@@ -256,6 +299,20 @@ public class IssueTool implements ToolDefinition {
         answer.put("status",   created.status() == null ? null : created.status().name());
 
         return answer;
+    }
+
+    /**
+     * The parent an invocation named, as an identifier — or null where it named none.
+     *
+     * <p>⚠️ Resolved through {@link #requireIssue}, so a key outside the scope reads as <em>no such
+     * issue</em> rather than as a parent in another project. The hierarchy rule itself is not checked
+     * here: {@code IssueHierarchyService} owns "strictly higher level" and refuses with the reason,
+     * and a second opinion in a tool is a second place for the two to disagree.
+     */
+    private String parentIdNamedBy(ToolInvocation invocation) {
+        return invocation.optionalString("parent")
+                .map(key -> requireIssue(invocation, key).getId())
+                .orElse(null);
     }
 
     // ── Editing one ──────────────────────────────────────────────────────────────
@@ -281,6 +338,9 @@ public class IssueTool implements ToolDefinition {
                         .optionalString("summary", "A new one-line summary.")
                         .optionalString("description", "A new description, as Markdown.")
                         .optionalString("priority", "A new priority, by name.")
+                        .optionalString("parent", "The issue this one should belong under, by key. Use "
+                                      + "it to adopt an existing issue into an epic. The parent's type "
+                                      + "must sit strictly higher in the hierarchy.")
                         .optionalNumber("storyPoints", "A new estimate.")
                         .confirm())
                 .requiredPermission(Permissions.EDIT_ISSUE)
@@ -292,7 +352,7 @@ public class IssueTool implements ToolDefinition {
 
     private Object handleUpdate(ToolInvocation invocation) {
         Issue         issue    = requireIssue(invocation, invocation.requiredString("issueKey"));
-        IssueResponse existing = issueService.getByKey(issue.getIssueKey());
+        IssueResponse existing = issueService.getByKey(issue.getIssueKey(), members.actingSubject(invocation));
 
         String priority = invocation.optionalString("priority")
                 .map(catalogs::priorityIdFor)
@@ -311,10 +371,147 @@ public class IssueTool implements ToolDefinition {
                         issue.getAssigneeMemberId(),
                         invocation.optionalNumber("storyPoints").orElse(issue.getStoryPoints())));
 
+        // ⚠️ A second call rather than a field, because the parent is not one: `UpdateIssueRequest` does
+        // not carry it, and the hierarchy has its own service, its own validation and its own history
+        // entry. Same permission (EDIT_ISSUE), so nothing here can be refused that the update was not.
+        String parentId = parentIdNamedBy(invocation);
+
+        if (parentId != null) {
+            hierarchyService.setParent(
+                    members.actingSubject(invocation), issue.getId(), new SetParentRequest(parentId));
+        }
+
         Map<String, Object> answer = new LinkedHashMap<>();
 
         answer.put("updated",  true);
         answer.put("issueKey", updated.issueKey());
+
+        return answer;
+    }
+
+    // ── Tying two of them together ───────────────────────────────────────────────
+
+    /**
+     * ⚠️ <strong>The three link actions are the only ones whose target may be outside the scope</strong>
+     * (TSSR-44) — see {@link #requireLinkableIssue}. The acting issue is scoped as usual and is what
+     * {@code EDIT_ISSUE} is checked against; the far end only has to be somewhere the caller can browse.
+     */
+    private ToolAction link() {
+        return ToolAction.builder()
+                .toolName(toolName())
+                .name("link")
+                .title("Link two issues")
+                .description("Records a typed relationship between two issues — 'Blocks', 'Tracks', "
+                           + "'Relates'. The other issue may be in a different project: gathering work "
+                           + "that spans projects under one tracking issue is what this is for.")
+                .inputSchema(ArgumentSchema.builder()
+                        .scope(ProjectScopeResolver.KIND, "projects_list")
+                        .requiredString("issueKey", "The issue the link is recorded on, e.g. TES-42.")
+                        .requiredString("otherIssueKey", "The issue at the other end. May be in another "
+                                                       + "project you belong to.")
+                        .requiredString("linkType", "The kind of relationship, by name — the "
+                                                  + "installation keeps a short list, e.g. 'Blocks'. "
+                                                  + "There is no default: the type is the whole content "
+                                                  + "of a link."))
+                .requiredPermission(Permissions.EDIT_ISSUE)
+                .scopeConfined()
+                .handler(this::handleLink)
+                .build();
+    }
+
+    private Object handleLink(ToolInvocation invocation) {
+        Issue issue = requireIssue(invocation, invocation.requiredString("issueKey"));
+        Issue other = requireLinkableIssue(invocation, invocation.requiredString("otherIssueKey"));
+        String linkTypeId = catalogs.linkTypeIdFor(invocation.requiredString("linkType"));
+
+        // The service's own refusals travel untouched — the duplicate check and the blocking-cycle walk
+        // live there, and a second copy here would be a second answer able to disagree with the first.
+        issueLinkService.addLink(
+                members.actingSubject(invocation),
+                issue.getId(),
+                new CreateIssueLinkRequest(linkTypeId, other.getId()));
+
+        return linkAnswer("linked", issue, other, invocation.requiredString("linkType"));
+    }
+
+    private ToolAction unlink() {
+        return ToolAction.builder()
+                .toolName(toolName())
+                .name("unlink")
+                .title("Remove a link between two issues")
+                .description("Removes a typed relationship between two issues. Addressed by the two "
+                           + "issues and the type, because no action hands out a link identifier.")
+                .inputSchema(ArgumentSchema.builder()
+                        .scope(ProjectScopeResolver.KIND, "projects_list")
+                        .requiredString("issueKey", "The issue the link is recorded on, e.g. TES-42.")
+                        .requiredString("otherIssueKey", "The issue at the other end.")
+                        .requiredString("linkType", "Which relationship to remove, by name."))
+                .requiredPermission(Permissions.EDIT_ISSUE)
+                .scopeConfined()
+                .handler(this::handleUnlink)
+                .build();
+    }
+
+    private Object handleUnlink(ToolInvocation invocation) {
+        Issue issue = requireIssue(invocation, invocation.requiredString("issueKey"));
+        Issue other = requireLinkableIssue(invocation, invocation.requiredString("otherIssueKey"));
+        String linkTypeId = catalogs.linkTypeIdFor(invocation.requiredString("linkType"));
+
+        issueLinkService.removeLink(
+                members.actingSubject(invocation),
+                issue.getId(),
+                issueLinkService.requireLinkBetween(issue.getId(), other.getId(), linkTypeId).getId());
+
+        return linkAnswer("unlinked", issue, other, invocation.requiredString("linkType"));
+    }
+
+    /**
+     * ⚠️ <strong>Retyping, not re-pointing.</strong> A link is {@code (source, target, type)}; changing
+     * an end is a different link, so that is unlink-then-link. And it is written to the activity log
+     * (TSSR-40), because turning "is blocked by" into "relates to" is also how a gate gets lifted.
+     */
+    private ToolAction relink() {
+        return ToolAction.builder()
+                .toolName(toolName())
+                .name("relink")
+                .title("Change what a link between two issues says")
+                .description("Changes an existing link's type without unmaking the relationship — a "
+                           + "'Blocks' that was really a 'Relates'. The change is recorded on the "
+                           + "issue's history.")
+                .inputSchema(ArgumentSchema.builder()
+                        .scope(ProjectScopeResolver.KIND, "projects_list")
+                        .requiredString("issueKey", "The issue the link is recorded on, e.g. TES-42.")
+                        .requiredString("otherIssueKey", "The issue at the other end.")
+                        .requiredString("linkType", "The relationship as it reads now, by name.")
+                        .requiredString("newLinkType", "What it should say instead, by name."))
+                .requiredPermission(Permissions.EDIT_ISSUE)
+                .scopeConfined()
+                .handler(this::handleRelink)
+                .build();
+    }
+
+    private Object handleRelink(ToolInvocation invocation) {
+        Issue issue = requireIssue(invocation, invocation.requiredString("issueKey"));
+        Issue other = requireLinkableIssue(invocation, invocation.requiredString("otherIssueKey"));
+        String linkTypeId = catalogs.linkTypeIdFor(invocation.requiredString("linkType"));
+        String nextTypeId = catalogs.linkTypeIdFor(invocation.requiredString("newLinkType"));
+
+        issueLinkService.changeLinkType(
+                members.actingSubject(invocation),
+                issue.getId(),
+                issueLinkService.requireLinkBetween(issue.getId(), other.getId(), linkTypeId).getId(),
+                nextTypeId);
+
+        return linkAnswer("relinked", issue, other, invocation.requiredString("newLinkType"));
+    }
+
+    private Map<String, Object> linkAnswer(String verb, Issue issue, Issue other, String linkType) {
+        Map<String, Object> answer = new LinkedHashMap<>();
+
+        answer.put(verb,           true);
+        answer.put("issueKey",     issue.getIssueKey());
+        answer.put("otherIssueKey", other.getIssueKey());
+        answer.put("linkType",     linkType);
 
         return answer;
     }
@@ -331,7 +528,14 @@ public class IssueTool implements ToolDefinition {
                 .inputSchema(ArgumentSchema.builder()
                         .scope(ProjectScopeResolver.KIND, "projects_list")
                         .requiredString("issueKey", "The issue to comment on, e.g. TES-42.")
-                        .requiredString("body", "What to say, as Markdown."))
+                        .requiredString("body", "What to say, as Markdown.")
+                        // Named, never identified — and the catalog is deliberately not listed here.
+                        // It is per-installation and editable on a screen, so a list in this string
+                        // would be stale the first time somebody renames a row. The refusal carries
+                        // the real one.
+                        .optionalString("topic", "What the comment is about, by name — the installation "
+                                               + "keeps a short list of them, e.g. 'Code review'. Omit "
+                                               + "for an ordinary remark."))
                 .requiredPermission(Permissions.ADD_COMMENT)
                 .scopeConfined()
                 .handler(this::handleComment)
@@ -344,7 +548,9 @@ public class IssueTool implements ToolDefinition {
         commentService.add(
                 members.actingSubject(invocation),
                 issue.getId(),
-                new SaveCommentRequest(invocation.requiredString("body")));
+                new SaveCommentRequest(
+                        invocation.requiredString("body"),
+                        catalogs.commentTopicIdFor(invocation.optionalString("topic").orElse(null))));
 
         Map<String, Object> answer = new LinkedHashMap<>();
 
@@ -432,6 +638,9 @@ public class IssueTool implements ToolDefinition {
                 // behaviour is unchanged, and it becomes an argument here whenever the assistant needs
                 // to ask for open work specifically.
                 false,
+                // includeArchived — a tool reads what a screen reads, and put-away work is off every
+                // screen (TSSR-4). It becomes an argument the day something needs to search the archive.
+                false,
                 0,
                 invocation.limitArgument(DEFAULT_LIMIT));
 
@@ -469,8 +678,10 @@ public class IssueTool implements ToolDefinition {
                                 "Name of the status to move it to, as a board column or a previous "
                               + "answer reported it.")
                         .optionalString("resolution",
-                                "Why it is finished — required only when the target status is a Done "
-                              + "one, and ignored otherwise.")
+                                "Why it is finished, by name — Done, Duplicate, Won't Do. Required "
+                              + "only when the target status is a Done one, and ignored otherwise. A "
+                              + "name the installation does not offer is refused with the list that "
+                              + "would have worked.")
                         .confirm())
                 .requiredPermission(Permissions.TRANSITION_ISSUE)
                 .scopeConfined()
@@ -575,8 +786,46 @@ public class IssueTool implements ToolDefinition {
              + reachable.stream().map(Status::getName).collect(Collectors.joining(", ")) + ".";
     }
 
+    /**
+     * ⚠️ Resolved by <strong>name</strong>, exactly like the status above and the type and priority on
+     * {@code create}. This argument used to reach the domain untouched — see
+     * {@link ToolCatalogs#resolutionIdFor} for what that cost.
+     */
     private String resolutionId(ToolInvocation invocation) {
-        return invocation.optionalString("resolution").orElse(null);
+        return catalogs.resolutionIdFor(invocation.optionalString("resolution").orElse(null));
+    }
+
+    /**
+     * The far end of a link — resolved <strong>outside</strong> the scope, on purpose (TSSR-44).
+     *
+     * <p>⚠️ <strong>A link crosses the project boundary by definition</strong>, which is the whole point
+     * of a tracking issue: an effort is one thing that lands in four projects. So this deliberately does
+     * not call {@code ScopeConfinement.require} — the acting issue stays scoped and its project is what
+     * the permission is checked against; the far end is resolved against everything the caller may
+     * browse.
+     *
+     * <p>⚠️ <strong>Out of view is "no such issue", never "forbidden".</strong> A project somebody does
+     * not belong to is a 404 to this protocol and always has been — saying "you may not" would confirm
+     * that the issue exists, which is the one thing the refusal must not do.
+     *
+     * <p>Keys are uppercased before the lookup rather than left to a collation, the same way
+     * {@code IssueService.getByKey} does it: MySQL would match either way and PostgreSQL would not.
+     *
+     * <p>⚠️ <strong>Asked of the one project, not of a list of every project.</strong> This filtered on
+     * {@code visibleProjectIds} and so refused every link for a caller who browses everything
+     * installation-wide — that answer is an empty list rather than "all of them", as its own javadoc
+     * warns, and this is the second place that warning has been earned. It also asked once per candidate.
+     */
+    private Issue requireLinkableIssue(ToolInvocation invocation, String issueKey) {
+        Member caller = members.actingSubject(invocation);
+
+        return issueRepository.findByIssueKey(issueKey.toUpperCase(Locale.ROOT))
+                .filter(candidate -> projectAccess.holds(
+                        caller, candidate.getProjectId(), Permissions.BROWSE_PROJECT))
+                .orElseThrow(() -> new ToolRefusedException(RefusalReason.NOTHING_TO_ACT_ON,
+                        "There is no issue '" + issueKey + "' you can see. Use issues_search to find one "
+                        + "— it searches every project you belong to, and an issue key is never "
+                        + "invented."));
     }
 
     private Issue requireIssue(ToolInvocation invocation, String issueKey) {

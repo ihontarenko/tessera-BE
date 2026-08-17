@@ -6,6 +6,7 @@ import org.jmouse.access.enforcement.ExternalAccessRules.Declaration;
 import org.jmouse.ai.management.AgentAdministrationController;
 import org.jmouse.ai.management.AgentSelfController;
 import org.jmouse.ai.management.OverviewController;
+import org.jmouse.ai.management.PreferenceController;
 import org.jmouse.ai.management.ProviderAdministrationController;
 import org.jmouse.ai.management.ProviderController;
 import org.jmouse.ai.management.ToolCallHistoryController;
@@ -63,6 +64,12 @@ public class AiManagementAccess {
                 // writes switch an agent off or end somebody's client mid-session. Neither belongs with
                 // the power to watch what the tools did.
                 .type(AgentAdministrationController.class, administering)
+                // ⚠️ The whole type again, and this one is the sharpest of the three. What it writes is
+                // the instructions every conversation begins with — so whoever can change it decides
+                // what the model is told to do with every permission every caller holds, without
+                // holding any of them. Its GET sits behind the same permission for the ordinary reason:
+                // a screen that shows a setting it cannot save is a screen nobody wanted.
+                .type(PreferenceController.class, administering)
                 // ⚠️ Only signed in, and deliberately no permission at all. Every route on it resolves
                 // the owner from the security context and refuses an agent that is not the caller's, so
                 // the authorization that matters is inside the handler rather than in front of it —

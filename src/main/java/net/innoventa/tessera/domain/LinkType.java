@@ -32,4 +32,21 @@ public class LinkType {
     @Column(name = "inward_label", nullable = false, length = 64)
     private String inwardLabel;
 
+    /**
+     * What a link of this type does — see {@link LinkTypeEffect} (TSSR-40).
+     *
+     * <p>⚠️ <strong>Not null, and {@code NONE} is a real answer.</strong> A nullable effect would make
+     * "does nothing" and "nobody said" two values that render the same and behave the same, which is one
+     * value too many.
+     *
+     * <p>⚠️ <strong>This is the single definition of "blocking".</strong> The filter grammar used to
+     * decide it by matching the link type's <em>name</em> against the literal {@code "Blocks"}, which
+     * broke the moment anybody renamed the row or added a second blocking type. Anything asking whether
+     * a link blocks reads this field.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 16)
+    @Builder.Default
+    private LinkTypeEffect effect = LinkTypeEffect.NONE;
+
 }

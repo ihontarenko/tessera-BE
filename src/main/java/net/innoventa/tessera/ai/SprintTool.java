@@ -1,11 +1,15 @@
 package net.innoventa.tessera.ai;
 
 import lombok.RequiredArgsConstructor;
+import net.innoventa.tessera.domain.Board;
+import net.innoventa.tessera.domain.BoardScopeStrategy;
 import net.innoventa.tessera.domain.Issue;
 import net.innoventa.tessera.domain.Sprint;
 import net.innoventa.tessera.domain.SprintIssue;
 import net.innoventa.tessera.domain.SprintState;
+import net.innoventa.tessera.dto.sprint.CreateSprintRequest;
 import net.innoventa.tessera.dto.sprint.SprintSummary;
+import net.innoventa.tessera.repository.BoardRepository;
 import net.innoventa.tessera.repository.IssueRepository;
 import net.innoventa.tessera.repository.SprintRepository;
 import net.innoventa.tessera.security.Permissions;
@@ -39,11 +43,21 @@ import java.util.stream.Collectors;
  * refuse an unknown one by listing the sprints that exist — the same rule {@code IssueTool} follows for
  * a status and {@code ToolCatalogs} for a type.
  *
- * <p>⚠️ <strong>There is no {@code create}, {@code start} or {@code complete}, and that is on
- * purpose.</strong> Starting a sprint sets a team's commitment for a fortnight and closing one decides
- * what happens to unfinished work; both are decisions somebody stands behind, made on a screen where
- * the consequences are laid out. A tool that could start a sprint would eventually start one because a
- * sentence sounded like it wanted one. Adding them is a decision, not an omission to fix.
+ * <p>⚠️ <strong>There is no {@code start} and no {@code complete}, and that is on purpose.</strong>
+ * Starting a sprint sets a team's commitment for a fortnight and closing one decides what happens to
+ * unfinished work; both are decisions somebody stands behind, made on a screen where the consequences
+ * are laid out. A tool that could start a sprint would eventually start one because a sentence sounded
+ * like it wanted one.
+ *
+ * <p>⚠️ <strong>{@code create} was refused on that same reasoning and has been let in, which is a
+ * narrowing of the rule rather than an abandonment of it.</strong> The argument above is about
+ * <em>commitment</em>, and a planned sprint is not one: it has no dates, no committed points and no
+ * issues, it changes nothing about work in flight, and deleting it costs a click. What the old rule
+ * actually cost was reachability — a Scrum project on the day it is created has no sprint, so
+ * {@link #read()} and {@link #addIssue()} both refused every call until somebody opened a screen, and
+ * the two most useful actions here were unreachable through the protocol they are published on. The
+ * line is drawn where the consequence is: naming a container is a tool's business, starting the clock
+ * on it is a person's.
  */
 @Component
 @RequiredArgsConstructor
@@ -53,6 +67,7 @@ public class SprintTool implements ToolDefinition {
     private final SprintMembershipService memberships;
     private final SprintRepository        sprints;
     private final IssueRepository         issues;
+    private final BoardRepository         boards;
     private final ToolMembers             members;
 
     @Override
@@ -62,7 +77,7 @@ public class SprintTool implements ToolDefinition {
 
     @Override
     public List<ToolAction> actions() {
-        return List.of(list(), read(), addIssue(), removeIssue());
+        return List.of(list(), read(), create(), addIssue(), removeIssue());
     }
 
     // ── Reading ──────────────────────────────────────────────────────────────────
@@ -122,6 +137,79 @@ public class SprintTool implements ToolDefinition {
         answer.put("committed", committed);
 
         return answer;
+    }
+
+    // ── Planning one ─────────────────────────────────────────────────────────────
+
+    /**
+     * ⚠️ <strong>Planned only — never started.</strong> The sprint this raises has a name, an optional
+     * goal, no dates and nothing committed to it, which is the whole of what makes it safe to create
+     * from a sentence. See the class note for where the line sits and why it moved.
+     *
+     * <p>⚠️ <strong>Refused outright on a project that does not plan in sprints.</strong> The domain
+     * would happily store the row — a sprint is not forbidden by a board's scope strategy — and it would
+     * then appear on no screen and scope no board, which is a thing that exists and does nothing. A
+     * caller that meant to plan is better told the project is not set up for it.
+     */
+    private ToolAction create() {
+        return ToolAction.builder()
+                .toolName(toolName())
+                .name("create")
+                .title("Plan a new sprint")
+                .description("Creates a sprint in a project that plans in sprints. It is planned and "
+                           + "not started: it has a name, an optional goal, no dates and nothing in "
+                           + "it. Starting it and closing it are decisions made on the backlog screen, "
+                           + "so there is deliberately no tool for either.")
+                .inputSchema(ArgumentSchema.builder()
+                        .scope(ProjectScopeResolver.KIND, "projects_list")
+                        .requiredString("name",
+                                "What the sprint is called — 'Sprint 4'. It is what every other sprint "
+                              + "action takes to name this one.")
+                        .optionalString("goal", "What the team means to achieve in it. Omit for none.")
+                        .confirm())
+                .requiredPermission(Permissions.MANAGE_SPRINT)
+                .scopeConfined()
+                .handler(this::handleCreate)
+                .build();
+    }
+
+    private Object handleCreate(ToolInvocation invocation) {
+        if (!plansInSprints(invocation)) {
+            throw new ToolRefusedException(RefusalReason.INVALID_ARGUMENT,
+                    "This project plans on a board of everything rather than in sprints, so a sprint "
+                    + "would sit on no screen and scope no board. Planning in sprints is a project "
+                    + "setting, changed on a screen.");
+        }
+
+        String name = invocation.requiredString("name");
+
+        requireUnusedSprintName(invocation, name);
+
+        SprintSummary created = sprintService.create(
+                invocation.scopeId(),
+                new CreateSprintRequest(name, invocation.optionalString("goal").orElse(null)));
+
+        Map<String, Object> answer = new LinkedHashMap<>(describe(created));
+
+        answer.put("created", true);
+
+        return answer;
+    }
+
+    /**
+     * ⚠️ Nothing in the schema stops two sprints sharing a name, and {@link #requireSprint} matches by
+     * name — so a duplicate would make every later {@code read} and {@code add_issue} act on whichever
+     * came first. Refusing here keeps the lookup those two depend on unambiguous.
+     */
+    private void requireUnusedSprintName(ToolInvocation invocation, String name) {
+        boolean taken = sprints.findByProjectIdOrderByCreatedAtAsc(invocation.scopeId()).stream()
+                .anyMatch(sprint -> name.equalsIgnoreCase(sprint.getName()));
+
+        if (taken) {
+            throw new ToolRefusedException(RefusalReason.INVALID_ARGUMENT,
+                    "This project already has a sprint called '" + name + "'. A second one by the same "
+                    + "name would make every later call ambiguous about which it meant.");
+        }
     }
 
     // ── Committing work, and taking it back ──────────────────────────────────────
@@ -237,17 +325,41 @@ public class SprintTool implements ToolDefinition {
                 .filter(sprint -> name.equalsIgnoreCase(sprint.getName()))
                 .findFirst()
                 .orElseThrow(() -> new ToolRefusedException(RefusalReason.NOTHING_TO_ACT_ON,
-                        describeMissingSprint(name, inProject)));
+                        describeMissingSprint(invocation, name, inProject)));
     }
 
-    private String describeMissingSprint(String name, List<Sprint> inProject) {
+    /**
+     * ⚠️ <strong>"No sprints" and "does not plan in sprints" are two different answers, and this used to
+     * give the second for both.</strong> A Scrum project on the day it is created has no sprints yet and
+     * plans in them all the same — telling that caller the project "plans on a board of everything" is a
+     * statement about the project that contradicts what {@code projects_get} reports, and it sends a
+     * model off to look for a board that is not the one it wants. The project itself is the only thing
+     * that knows which case this is, so ask it rather than inferring it from an empty list.
+     */
+    private String describeMissingSprint(ToolInvocation invocation, String name, List<Sprint> inProject) {
         if (inProject.isEmpty()) {
+            if (plansInSprints(invocation)) {
+                return "This project plans in sprints but none has been created yet, so there is "
+                     + "nothing to commit work to. A sprint is started on the backlog screen — see "
+                     + "sprints_list, which will show it once it exists.";
+            }
+
             return "This project has no sprints at all — it plans on a board of everything rather than "
                  + "in sprints, so there is nothing to commit work to.";
         }
 
         return "This project has no sprint called '" + name + "'. Its sprints are: "
              + inProject.stream().map(Sprint::getName).collect(Collectors.joining(", ")) + ".";
+    }
+
+    /**
+     * Whether this project plans in sprints at all — a property of its board and of nothing else
+     * (ADR-0015), read the same way {@code ProjectService} reads it so the two never disagree.
+     */
+    private boolean plansInSprints(ToolInvocation invocation) {
+        return boards.findByProjectId(invocation.scopeId())
+                .map(Board::getScopeStrategy)
+                .orElse(BoardScopeStrategy.ALL_ISSUES) == BoardScopeStrategy.ACTIVE_SPRINT;
     }
 
     private Issue requireIssue(ToolInvocation invocation, String issueKey) {

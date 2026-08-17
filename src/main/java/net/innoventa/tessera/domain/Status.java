@@ -30,4 +30,18 @@ public class Status {
     @Column(nullable = false, length = 16)
     private StatusCategory category;
 
+    /**
+     * A CSS colour the pill is drawn in, or {@code null} to be drawn from the {@link #category}.
+     *
+     * <p>⚠️ <strong>Null is a meaning, not a gap.</strong> It says "whatever this category looks like",
+     * which is how every status looked before there was a column — so a team that never opens the
+     * picker sees no change, and clearing the field is a real way back to the default rather than a
+     * value to invent.
+     *
+     * <p>Purely presentational: nothing in the workflow, the board or the closed/open invariant reads
+     * it. The {@link #category} remains the field that carries meaning (ADR-0004).
+     */
+    @Column(length = 16)
+    private String color;
+
 }

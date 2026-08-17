@@ -39,7 +39,17 @@ public class IssueHierarchyService {
 
     @Transactional
     public IssueResponse setParent(Jwt jwt, String issueId, SetParentRequest request) {
-        Member caller = memberService.resolveMember(jwt);
+        return setParent(memberService.resolveMember(jwt), issueId, request);
+    }
+
+    /**
+     * The same, for a caller that is not an HTTP request — see {@code IssueService.create(Member)}.
+     *
+     * <p>⚠️ A tool call has no security context to resolve a {@code Jwt} out of, so an agent adopting an
+     * issue into an epic needs this overload rather than the one above (TSSR-2).
+     */
+    @Transactional
+    public IssueResponse setParent(Member caller, String issueId, SetParentRequest request) {
         Issue issue = requireIssue(issueId);
         Project project = projectService.requireProject(issue.getProjectId());
 
@@ -56,7 +66,7 @@ public class IssueHierarchyService {
         activityLogService.record(issue.getId(), caller.getId(),
             activityLogService.changeSet().compare(FIELD_PARENT, oldParentKey, newParentKey));
 
-        return issueAssembler.detail(issue, project);
+        return issueAssembler.detail(issue, project, caller);
     }
 
     /**

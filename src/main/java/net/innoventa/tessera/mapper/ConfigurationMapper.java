@@ -1,9 +1,11 @@
 package net.innoventa.tessera.mapper;
 
+import net.innoventa.tessera.domain.CommentTopic;
 import net.innoventa.tessera.domain.IssueType;
 import net.innoventa.tessera.domain.Priority;
 import net.innoventa.tessera.domain.Resolution;
 import net.innoventa.tessera.domain.Status;
+import net.innoventa.tessera.dto.configuration.CommentTopicResponse;
 import net.innoventa.tessera.dto.configuration.IssueTypeResponse;
 import net.innoventa.tessera.dto.configuration.PriorityResponse;
 import net.innoventa.tessera.dto.configuration.ResolutionResponse;
@@ -36,5 +38,9 @@ public interface ConfigurationMapper {
     ResolutionResponse toResponse(Resolution resolution);
 
     List<ResolutionResponse> toResolutionResponses(List<Resolution> resolutions);
+
+    CommentTopicResponse toResponse(CommentTopic commentTopic);
+
+    List<CommentTopicResponse> toCommentTopicResponses(List<CommentTopic> commentTopics);
 
 }

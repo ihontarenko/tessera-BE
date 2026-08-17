@@ -14,6 +14,7 @@ public record ConfigurationResponse(
     List<StatusCategory> statusCategories,
     List<StatusResponse> statuses,
     List<ResolutionResponse> resolutions,
+    List<CommentTopicResponse> commentTopics,
     List<WorkflowResponse> workflows,
     List<IssueTypeSchemeResponse> issueTypeSchemes,
     List<WorkflowSchemeResponse> workflowSchemes,

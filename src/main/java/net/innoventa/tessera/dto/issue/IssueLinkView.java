@@ -11,6 +11,6 @@ public record IssueLinkView(
     String linkTypeName,
     LinkDirection direction,
     String label,
-    IssueRef issue
+    IssueReference issue
 ) {
 }

@@ -17,6 +17,16 @@ public record CommentResponse(
     String id,
     MemberSummary author,
     String agentName,
+    /** What it is about, where somebody said — null for an ordinary remark (TSSR-25). */
+    CommentTopicSummary topic,
+    /**
+     * The comment this one answers, or null when it stands on its own (TSSR-26).
+     *
+     * ⚠️ Flat, not a nested {@code replies} array. One shape, no recursion in the payload, and the
+     * client groups — the same reasoning {@code PageBlockView} sets out. A nested response would also
+     * turn "edit this reply" into a search through a tree.
+     */
+    String parentCommentId,
     String body,
     boolean editable,
     LocalDateTime createdAt,

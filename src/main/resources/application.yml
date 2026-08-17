@@ -316,6 +316,15 @@ jmouse:
       # A browser round trip plus a client's callback, and not a second more than that needs.
       code-lifetime: ${TESSERA_MCP_CODE_LIFETIME:120s}
 
+      # ⚠️ ON, FOR ONE CLIENT THAT CANNOT BE LISTED. Codex registers a fresh nonce in the path it listens
+      # on — http://127.0.0.1:<port>/callback/<nonce> — so there is no spelling of it to add to the
+      # allowed paths, and exact matching refused it at registration. What this allows is a client's own
+      # segments UNDER an already-allowed path, held to unreserved characters, on a loopback address it
+      # already had to prove: those segments are routes inside that client's own listener, so nothing is
+      # reachable that /callback did not already reach. The host, the explicit port, the absent query and
+      # fragment, and PKCE are untouched. Turn it off for a deployment whose clients all use a bare path.
+      allow-nested-redirect-paths: ${TESSERA_MCP_ALLOW_NESTED_REDIRECT_PATHS:true}
+
       consent:
         # Where oidc-client-ts keeps the signed-in user: one JSON document under a key built from the
         # issuer and the client identifier. ⚠️ Changing either of those in Tessera/UI changes this key,

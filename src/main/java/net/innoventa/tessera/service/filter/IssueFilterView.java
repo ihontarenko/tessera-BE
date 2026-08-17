@@ -1,5 +1,7 @@
 package net.innoventa.tessera.service.filter;
 
+import net.innoventa.tessera.domain.LinkTypeEffect;
+
 import java.time.Instant;
 import java.util.List;
 import java.util.Objects;
@@ -69,13 +71,27 @@ public record IssueFilterView(
      * at all — "blocked" is the <em>inward</em> half of a Blocks link, and without the direction the
      * blocker and the blocked would be indistinguishable.
      */
-    public record LinkReference(String type, String direction, String issueKey) {
+    public record LinkReference(String type, String direction, String issueKey, String effect) {
 
         /** This issue is the source: it {@code blocks} the other one. */
         public static final String OUTWARD = "OUTWARD";
 
         /** This issue is the target: it {@code is blocked by} the other one. */
         public static final String INWARD = "INWARD";
+
+        /**
+         * Whether a link of this type actually holds something up.
+         *
+         * <p>⚠️ <strong>Read from the type's effect, never from its name</strong> (TSSR-40). This used to
+         * compare the name against the literal {@code "Blocks"}, which stopped being true the moment
+         * anybody renamed the row — and could never be true for a second blocking type. A warning is
+         * deliberately not blocking: it is the level a team picks precisely because it does not stop
+         * anybody.
+         */
+        public boolean blocking() {
+            return LinkTypeEffect.BLOCKS_START.name().equals(effect)
+                || LinkTypeEffect.BLOCKS_DONE.name().equals(effect);
+        }
 
     }
 

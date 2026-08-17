@@ -1,6 +1,7 @@
 package net.innoventa.tessera.ai;
 
 import lombok.RequiredArgsConstructor;
+import net.innoventa.tessera.security.Permissions;
 import net.innoventa.tessera.security.access.ProjectAccess;
 import org.jmouse.access.Subject;
 import org.jmouse.ai.CallerIdentity;
@@ -43,11 +44,22 @@ import org.springframework.stereotype.Component;
  *       override on them personally beats the role that grants it.
  * </ul>
  *
- * <p>⚠️ <strong>The first question costs a query per project the caller can reach.</strong> That is
- * honest for a tracker where a person belongs to a handful, and it is the price of a scope-free gate over
- * a model that has no scope-free answer. {@code AccessToolAuthorizer} in {@code jmouse-ai-access} answers
- * it in one query instead, through {@code visibilityFor(...).seesNothing()} — adopting it wholesale is
- * the right end state and needs a {@code ScopeCatalog} this product has not published yet.
+ * <h2>⚠️ The first question is about breadth, not about places</h2>
+ *
+ * <p>{@link #permits} used to iterate every project the caller could reach and ask about each. That
+ * costs a query per project, and — worse — it answered a narrower question than it appeared to: a
+ * caller holding the permission <em>installation-wide</em> reaches no project by name, because a
+ * visibility scope says {@code EVERYTHING} rather than listing them. The stream was then empty and
+ * every action was refused, naming a permission the caller genuinely held. It now asks
+ * {@code ProjectAccess.holdsAnywhere}, which reads the breadth in one query — the same
+ * {@code seesNothing()} shape {@code AccessToolAuthorizer} in {@code jmouse-ai-access} uses, adopted
+ * here without waiting for the {@code ScopeCatalog} this product has still not published.
+ *
+ * <p>⚠️ <strong>A scope-free yes is not a yes.</strong> It only says the caller is not a stranger to
+ * this permission; {@link #permitsInScope} is what decides the project the call actually names, and a
+ * DENY override there still wins. An action that is not scope-confined — {@code projects_create}, which
+ * has no project to be confined to — is gated by this question alone, so the permission it declares has
+ * to be one that means something installation-wide.
  */
 @Component
 @RequiredArgsConstructor
@@ -57,17 +69,57 @@ public class TesseraToolAuthorizer implements ToolAuthorizer {
 
     @Override
     public boolean permits(CallerIdentity caller, ToolAction action) {
-        Subject subject = CallerSubjects.of(caller);
-
-        // Every project the caller can reach, from the grants — there is no membership table to ask.
-        return projectAccess.visibleProjectIds(subject).stream()
-                .anyMatch(projectId ->
-                        projectAccess.holds(subject, projectId, action.requiredPermission()));
+        // Anywhere at all — installation-wide, at some project, or over the caller's own rows. Asking
+        // for the places instead would miss the first of those; see ProjectAccess.holdsAnywhere.
+        return projectAccess.holdsAnywhere(
+                CallerSubjects.of(caller), action.requiredPermission());
     }
 
     @Override
     public boolean permitsInScope(CallerIdentity caller, ToolAction action, InvocationScope scope) {
         return projectAccess.holds(
                 CallerSubjects.of(caller), scope.id(), action.requiredPermission());
+    }
+
+    /**
+     * Why the permission is missing, for the one cause that reads as a broken installation and is not.
+     *
+     * <p>⚠️ <strong>On a freshly created database every tool refuses at once, and the refusal names a
+     * permission.</strong> That sentence sent whoever read it — a person, or a model reporting to
+     * one — to debug the token, the agent's authority flag and the caller resolver, all of which were
+     * correct. The cause is structural: {@code MemberProvisioner} makes the first member a global access
+     * administrator, and {@code policy/tessera.jmp} deliberately gives that role no project permission at
+     * all, because every one of them is carried by the three {@code @PROJECT} roles and those are handed
+     * out by {@code ProjectService.create}. Belonging to no project is therefore holding nothing, and no
+     * amount of granting fixes it — only a project does.
+     *
+     * <p>Two cases are deliberately left to the plain refusal, because for them this diagnosis would be
+     * false:
+     *
+     * <ul>
+     *   <li>{@link Permissions#CREATE_PROJECT} — the way out of the state cannot also be the thing the
+     *       state is blocking, and this one is installation-wide precisely so that it never is. A caller
+     *       refused <em>here</em> has a genuinely misconfigured role.
+     *   <li>Anybody who browses a project somewhere. They belong to something, so their missing
+     *       permission is an ordinary missing permission and pointing them at project creation would be
+     *       nonsense. This also covers every scope-confined refusal for free — reaching a project by
+     *       name means browsing it.
+     * </ul>
+     */
+    @Override
+    public String refusalAdvice(CallerIdentity caller, ToolAction action, InvocationScope scope) {
+        if (Permissions.CREATE_PROJECT.equals(action.requiredPermission())) {
+            return null;
+        }
+
+        if (projectAccess.holdsAnywhere(CallerSubjects.of(caller), Permissions.BROWSE_PROJECT)) {
+            return null;
+        }
+
+        return "This caller belongs to no project, and in Tessera every project permission is carried by "
+               + "belonging to one — so nothing was granted wrongly, there is simply nowhere the grant "
+               + "could have come from. Create the first project with 'projects_create', which needs no "
+               + "project to exist, or ask somebody who administers an existing one to add this caller "
+               + "to it.";
     }
 }

@@ -45,7 +45,9 @@ public class TransitionService {
     private final WorkflowResolver workflowResolver;
     private final ActivityLogService activityLogService;
     private final IssueCatalog issueCatalog;
+    private final IssueArchiveService issueArchiveService;
     private final IssueAssembler issueAssembler;
+    private final IssueBlockers issueBlockers;
 
     @Transactional
     public IssueResponse transition(Jwt jwt, String issueId, TransitionIssueRequest request) {
@@ -71,6 +73,15 @@ public class TransitionService {
                 "Illegal transition: no edge to '" + target.getName() + "' from the issue's current status");
         }
 
+        // ⚠️ A second kind of refusal, and it is deliberately not the workflow's (TSSR-41). The edge
+        // exists; something else is holding this issue up. Read here as well as in the offered list,
+        // because a caller that never looked at the list — the protocol, a script — still has to be told.
+        String blocked = issueBlockers.refusalFor(issue, target.getCategory());
+
+        if (blocked != null) {
+            throw new BusinessRuleViolationException(blocked);
+        }
+
         String newResolutionId = resolveResolutionForTarget(target, request.resolutionId());
 
         String oldStatusName = issueCatalog.statusName(issue.getStatusId());
@@ -83,11 +94,19 @@ public class TransitionService {
         // the board's done-threshold hiding accurately, unlike updatedAt which any later edit resets.
         issue.setResolvedAt(target.getCategory() == StatusCategory.DONE ? LocalDateTime.now() : null);
 
+        // ⚠️ Reopening takes the issue back out of the archive (TSSR-4). Archived work is finished work
+        // that has been put away, so an issue that is open again cannot stay put away — it would be open
+        // and invisible at once, the one state no screen in the product could explain. Same axis, same
+        // path, same instant as the resolution being cleared.
+        if (target.getCategory() != StatusCategory.DONE) {
+            issueArchiveService.clear(issue);
+        }
+
         activityLogService.record(issue.getId(), caller.getId(), activityLogService.changeSet()
             .compare(FIELD_STATUS, oldStatusName, target.getName())
             .compare(FIELD_RESOLUTION, oldResolutionName, issueCatalog.resolutionName(newResolutionId)));
 
-        return issueAssembler.detail(issue, project);
+        return issueAssembler.detail(issue, project, caller);
     }
 
     /**

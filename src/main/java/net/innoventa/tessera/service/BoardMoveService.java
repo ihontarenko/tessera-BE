@@ -47,6 +47,7 @@ public class BoardMoveService {
     private final TransitionService transitionService;
     private final BoardService boardService;
     private final BoardColumnResolver boardColumnResolver;
+    private final IssueBlockers issueBlockers;
 
     @Transactional
     public BoardCardView move(Jwt jwt, String projectId, BoardMoveRequest request) {
@@ -68,7 +69,7 @@ public class BoardMoveService {
         } else {
             projectAccess.require(caller, projectId, Permissions.TRANSITION_ISSUE);
             String workflowId = workflowResolver.resolveWorkflowId(project, issue.getIssueTypeId());
-            Status targetStatus = resolveTargetStatus(targetColumn, mapping, workflowId, issue.getStatusId());
+            Status targetStatus = resolveTargetStatus(targetColumn, mapping, workflowId, issue);
             transitionService.transition(jwt, issue.getId(), new TransitionIssueRequest(targetStatus.getId(), request.resolutionId()));
         }
 
@@ -85,13 +86,33 @@ public class BoardMoveService {
      * allows a legal edge into from its current status. No candidate at all — the column maps no legal
      * status for this issue — is refused as a business-rule violation ({@code 409}).
      */
-    private Status resolveTargetStatus(BoardColumn targetColumn, BoardService.ColumnMapping mapping, String workflowId, String fromStatusId) {
-        return statusRepository.findAllByOrderByNameAsc().stream()
+    private Status resolveTargetStatus(BoardColumn targetColumn, BoardService.ColumnMapping mapping, String workflowId, Issue issue) {
+        List<Status> legal = statusRepository.findAllByOrderByNameAsc().stream()
             .filter(status -> targetColumn.getId().equals(boardColumnResolver.resolveColumnId(status, mapping.columns(), mapping.statusToColumn())))
-            .filter(status -> workflowResolver.transitionExists(workflowId, fromStatusId, status.getId()))
+            .filter(status -> workflowResolver.transitionExists(workflowId, issue.getStatusId(), status.getId()))
+            .toList();
+
+        // ⚠️ Blocked candidates are skipped rather than picked and then refused (TSSR-41). A column may
+        // map several statuses, and taking the first one alphabetically would fail a drag that had a
+        // perfectly good landing place one entry further down.
+        Status unblocked = legal.stream()
+            .filter(status -> issueBlockers.blocking(issue.getId(), status.getCategory()).isEmpty())
             .findFirst()
-            .orElseThrow(() -> new BusinessRuleViolationException(
-                "No legal transition into column '" + targetColumn.getName() + "' from the issue's current status"));
+            .orElse(null);
+
+        if (unblocked != null) {
+            return unblocked;
+        }
+
+        // ⚠️ And when every candidate is blocked, the refusal says so. Falling through to "no legal
+        // transition" would name the workflow for something the workflow allows, sending whoever reads
+        // it to the wrong screen.
+        if (!legal.isEmpty()) {
+            throw new BusinessRuleViolationException(issueBlockers.refusalFor(issue, legal.getFirst().getCategory()));
+        }
+
+        throw new BusinessRuleViolationException(
+            "No legal transition into column '" + targetColumn.getName() + "' from the issue's current status");
     }
 
     private BoardColumn requireColumn(String columnId, List<BoardColumn> columns) {

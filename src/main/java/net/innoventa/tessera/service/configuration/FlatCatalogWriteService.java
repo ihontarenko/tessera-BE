@@ -1,9 +1,12 @@
 package net.innoventa.tessera.service.configuration;
 
 import lombok.RequiredArgsConstructor;
+import net.innoventa.tessera.domain.CommentTopic;
 import net.innoventa.tessera.domain.LinkType;
 import net.innoventa.tessera.domain.Priority;
 import net.innoventa.tessera.domain.Resolution;
+import net.innoventa.tessera.dto.configuration.CommentTopicRequest;
+import net.innoventa.tessera.dto.configuration.CommentTopicResponse;
 import net.innoventa.tessera.dto.configuration.LinkTypeRequest;
 import net.innoventa.tessera.dto.configuration.PriorityRequest;
 import net.innoventa.tessera.dto.configuration.PriorityResponse;
@@ -12,6 +15,7 @@ import net.innoventa.tessera.dto.configuration.ResolutionResponse;
 import net.innoventa.tessera.dto.link.LinkTypeResponse;
 import net.innoventa.tessera.exception.BusinessRuleViolationException;
 import net.innoventa.tessera.exception.ResourceNotFoundException;
+import net.innoventa.tessera.repository.CommentTopicRepository;
 import net.innoventa.tessera.repository.LinkTypeRepository;
 import net.innoventa.tessera.repository.PriorityRepository;
 import net.innoventa.tessera.repository.ResolutionRepository;
@@ -26,7 +30,7 @@ import java.util.Set;
 import java.util.function.Supplier;
 
 /**
- * Writing the three catalogs with no graph semantics — priorities, resolutions and link types.
+ * Writing the catalogs with no graph semantics — priorities, resolutions, link types, comment topics.
  *
  * <p>They are together because they are one family: a row with a name, no edges, no scheme, and nothing
  * downstream that has to be recomputed when it changes. Statuses, workflows and issue types each carry a
@@ -52,11 +56,12 @@ public class FlatCatalogWriteService {
 
     private static final Logger LOGGER = LoggerFactory.getLogger(FlatCatalogWriteService.class);
 
-    private final PriorityRepository   priorityRepository;
-    private final ResolutionRepository resolutionRepository;
-    private final LinkTypeRepository   linkTypeRepository;
-    private final ConfigurationUsage   configurationUsage;
-    private final Supplier<String>     idGenerator;
+    private final PriorityRepository     priorityRepository;
+    private final ResolutionRepository   resolutionRepository;
+    private final LinkTypeRepository     linkTypeRepository;
+    private final CommentTopicRepository commentTopicRepository;
+    private final ConfigurationUsage     configurationUsage;
+    private final Supplier<String>       idGenerator;
 
     // ── Priorities ────────────────────────────────────────────────────────────
 
@@ -193,6 +198,7 @@ public class FlatCatalogWriteService {
             .name(name)
             .outwardLabel(request.outwardLabel().trim())
             .inwardLabel(request.inwardLabel().trim())
+            .effect(request.effectOrNone())
             .build());
 
         LOGGER.info("Link type '{}' created ({} / {})", name, linkType.getOutwardLabel(), linkType.getInwardLabel());
@@ -208,9 +214,17 @@ public class FlatCatalogWriteService {
 
         LOGGER.info("Link type '{}' renamed to '{}'", linkType.getName(), name);
 
+        if (linkType.getEffect() != request.effectOrNone()) {
+            // Worth its own line: this is the field that decides whether the product acts on links of
+            // this type, so turning it on or off is a change to behaviour rather than to wording.
+            LOGGER.info("Link type '{}' effect changes from {} to {}",
+                linkType.getName(), linkType.getEffect(), request.effectOrNone());
+        }
+
         linkType.setName(name);
         linkType.setOutwardLabel(request.outwardLabel().trim());
         linkType.setInwardLabel(request.inwardLabel().trim());
+        linkType.setEffect(request.effectOrNone());
 
         return LinkTypeResponse.from(linkType);
     }
@@ -229,6 +243,77 @@ public class FlatCatalogWriteService {
         linkTypeRepository.delete(linkType);
 
         LOGGER.info("Link type '{}' deleted", linkType.getName());
+    }
+
+    // ── Comment topics ────────────────────────────────────────────────────────
+
+    public CommentTopicResponse createCommentTopic(CommentTopicRequest request) {
+        String name = CatalogRules.requireName(request.name(), "comment topic");
+        CatalogRules.requireNameAvailable(
+            commentTopicRepository.existsByNameIgnoreCase(name), "comment topic", name);
+        requireDrawableTopicIcon(request.iconKey());
+
+        CommentTopic commentTopic = commentTopicRepository.save(CommentTopic.builder()
+            .id(idGenerator.get())
+            .name(name)
+            .description(request.description())
+            .iconKey(CatalogRules.storedOptional(request.iconKey()))
+            .color(CatalogRules.storedOptional(request.color()))
+            .build());
+
+        LOGGER.info("Comment topic '{}' created", name);
+
+        return toResponse(commentTopic);
+    }
+
+    public CommentTopicResponse updateCommentTopic(String commentTopicId, CommentTopicRequest request) {
+        CommentTopic commentTopic = requireCommentTopic(commentTopicId);
+        String name = CatalogRules.requireName(request.name(), "comment topic");
+        CatalogRules.requireNameAvailable(
+            commentTopicRepository.existsByNameIgnoreCaseAndIdNot(name, commentTopicId), "comment topic", name);
+        requireDrawableTopicIcon(request.iconKey());
+
+        LOGGER.info("Comment topic '{}' renamed to '{}'", commentTopic.getName(), name);
+
+        commentTopic.setName(name);
+        commentTopic.setDescription(request.description());
+        commentTopic.setIconKey(CatalogRules.storedOptional(request.iconKey()));
+        commentTopic.setColor(CatalogRules.storedOptional(request.color()));
+
+        return toResponse(commentTopic);
+    }
+
+    /**
+     * ⚠️ Refused rather than accepted-and-rendered-generically — the same reasoning
+     * {@code IssueTypeWriteService.requireDrawableIcon} sets out: the fallback mark means an unknown key
+     * produces a topic that looks exactly like a correct one, forever, with nothing anywhere reporting
+     * it.
+     */
+    private static void requireDrawableTopicIcon(String iconKey) {
+        if (CommentTopicIcons.isAcceptable(iconKey)) {
+            return;
+        }
+
+        throw new BusinessRuleViolationException(
+            "'" + iconKey + "' is not an icon this build draws. Choose one of: "
+            + String.join(", ", CommentTopicIcons.ALL) + ".");
+    }
+
+    /**
+     * ⚠️ <strong>No last-row rule here, and that is deliberate</strong> — the same reasoning link types
+     * are exempt under. A topic is optional, so an installation with none is coherent: it means nobody
+     * labels their comments, not that something is broken. Contrast {@link #deleteResolution}, where the
+     * last row is refused because closing an issue would have nothing to offer.
+     */
+    public void deleteCommentTopic(String commentTopicId) {
+        CommentTopic commentTopic = requireCommentTopic(commentTopicId);
+
+        CatalogRules.requireNothingHoldsIt(
+            configurationUsage.ofCommentTopic(commentTopicId), "comment topic", commentTopic.getName());
+
+        commentTopicRepository.delete(commentTopic);
+
+        LOGGER.info("Comment topic '{}' deleted", commentTopic.getName());
     }
 
     // ── ─────────────────────────────────────────────────────────────────────
@@ -270,6 +355,20 @@ public class FlatCatalogWriteService {
 
     private ResolutionResponse toResponse(Resolution resolution) {
         return new ResolutionResponse(resolution.getId(), resolution.getName(), resolution.getDescription());
+    }
+
+    private CommentTopic requireCommentTopic(String commentTopicId) {
+        return commentTopicRepository.findById(commentTopicId)
+            .orElseThrow(() -> new ResourceNotFoundException("Comment topic not found: " + commentTopicId));
+    }
+
+    private CommentTopicResponse toResponse(CommentTopic commentTopic) {
+        return new CommentTopicResponse(
+            commentTopic.getId(),
+            commentTopic.getName(),
+            commentTopic.getDescription(),
+            commentTopic.getIconKey(),
+            commentTopic.getColor());
     }
 
 }

@@ -87,7 +87,7 @@ public class AccessAdministrationService {
                 .collect(Collectors.toMap(Member::getId, MemberSummary::from));
 
         Map<String, ProjectRef> whereIsWhere = projects.findAll().stream()
-                .collect(Collectors.toMap(Project::getId, AccessAdministrationService::refOf));
+                .collect(Collectors.toMap(Project::getId, AccessAdministrationService::referenceOf));
 
         return new AccessOverview(
                 permissions(),
@@ -331,7 +331,7 @@ public class AccessAdministrationService {
         return TesseraScope.PROJECT.equals(at.type()) ? whereIsWhere.get(at.id()) : null;
     }
 
-    private static ProjectRef refOf(Project project) {
+    private static ProjectRef referenceOf(Project project) {
         return new ProjectRef(project.getId(), project.getKey(), project.getName());
     }
 

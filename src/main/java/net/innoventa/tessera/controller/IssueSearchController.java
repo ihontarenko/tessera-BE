@@ -4,8 +4,10 @@ import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import net.innoventa.tessera.dto.issue.IssueReferenceRequest;
 import net.innoventa.tessera.dto.issue.IssueReferenceView;
+import net.innoventa.tessera.dto.issue.IssueRegisterResponse;
 import net.innoventa.tessera.dto.issue.IssueSearchResponse;
 import net.innoventa.tessera.service.IssueReferenceService;
+import net.innoventa.tessera.service.IssueRegisterService;
 import net.innoventa.tessera.service.IssueSearchService;
 import org.jmouse.access.enforcement.RequiresAccess;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -35,6 +37,7 @@ import java.util.List;
 public class IssueSearchController {
 
     private final IssueSearchService    issueSearchService;
+    private final IssueRegisterService  issueRegisterService;
     private final IssueReferenceService issueReferenceService;
 
     /**
@@ -66,10 +69,38 @@ public class IssueSearchController {
         @RequestParam(required = false) String statusId,
         @RequestParam(required = false) String assigneeMemberId,
         @RequestParam(defaultValue = "false") boolean openOnly,
+        @RequestParam(defaultValue = "false") boolean includeArchived,
         @RequestParam(defaultValue = "0") int page,
         @RequestParam(defaultValue = "25") int size
     ) {
-        return issueSearchService.search(jwt, text, projectId, statusId, assigneeMemberId, openOnly, page, size);
+        return issueSearchService.search(jwt, text, projectId, statusId, assigneeMemberId, openOnly,
+            includeArchived, page, size);
+    }
+
+    /**
+     * The registers — which efforts are being tracked, and what each one gathers (TSSR-45).
+     *
+     * <p>Here rather than under {@code /api/issues/{id}} for the reason the search above is: its subject is
+     * the caller, not one issue. Bare {@code @RequiresAccess} for the same reason too — there is no place
+     * to be refused at, and what confines the answer is the filtering.
+     *
+     * <p>⚠️ {@code linkTypeId} is <em>optional and never a name</em>. Which type means "gathers an effort"
+     * is the interface's default and the reader's choice; naming one here would be TSSR-40's mistake with a
+     * fresh coat of paint.
+     */
+    @GetMapping("/api/issues/registers")
+    public IssueRegisterResponse registers(
+        @AuthenticationPrincipal Jwt jwt,
+        @RequestParam(required = false) String linkTypeId,
+        /**
+         * Which end of the arrow these issues are on — {@code false} the ones that gather, {@code true} the
+         * ones gathered. ⚠️ Never both: one link read from both ends is one issue listed twice.
+         */
+        @RequestParam(defaultValue = "false") boolean inward,
+        @RequestParam(defaultValue = "0") int page,
+        @RequestParam(defaultValue = "10") int size
+    ) {
+        return issueRegisterService.registers(jwt, linkTypeId, inward, page, size);
     }
 
 }

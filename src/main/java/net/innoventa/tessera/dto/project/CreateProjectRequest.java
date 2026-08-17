@@ -23,6 +23,12 @@ public record CreateProjectRequest(
         regexp = "^[A-Z][A-Z0-9]*$",
         message = "must be uppercase letters and digits, starting with a letter") String key,
     @NotNull BoardScopeStrategy boardScopeStrategy,
-    String leadMemberId
+    String leadMemberId,
+    /**
+     * One emoji, or nothing (TSSR-7). ⚠️ {@code @Size} is the column's bound, not the rule — "exactly one
+     * emoji" is a grapheme-cluster count, which no annotation can express; {@code ProjectIcon} refuses the
+     * rest with a sentence.
+     */
+    @Size(max = 16) String icon
 ) {
 }

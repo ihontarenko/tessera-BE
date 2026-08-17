@@ -7,6 +7,7 @@ import net.innoventa.tessera.security.access.Scopes;
 import net.innoventa.tessera.service.configuration.ConfigurationUsage;
 import net.innoventa.tessera.service.configuration.ConfigurationUsage.ConfigurationCounts;
 import net.innoventa.tessera.service.configuration.FilterMentions;
+import net.innoventa.tessera.service.configuration.CommentTopicIcons;
 import net.innoventa.tessera.service.configuration.IssueTypeIcons;
 import org.jmouse.access.enforcement.RequiresAccess;
 import org.springframework.web.bind.annotation.GetMapping;
@@ -71,6 +72,17 @@ public class ConfigurationAdministrationController {
     @GetMapping("/issue-type-icons")
     public List<String> issueTypeIcons() {
         return IssueTypeIcons.ALL;
+    }
+
+    /**
+     * The same, for the comment-topic picker.
+     *
+     * <p>⚠️ A different list, not the one above — those keys name kinds of work, these name kinds of
+     * remark. See {@code CommentTopicIcons}.
+     */
+    @GetMapping("/comment-topic-icons")
+    public List<String> commentTopicIcons() {
+        return CommentTopicIcons.ALL;
     }
 
 }

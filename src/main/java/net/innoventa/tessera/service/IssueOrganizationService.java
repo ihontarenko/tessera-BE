@@ -56,7 +56,7 @@ public class IssueOrganizationService {
 
         activityLogService.record(issueId, caller.getId(), changes);
 
-        return issueAssembler.detail(issue, project);
+        return issueAssembler.detail(issue, project, caller);
     }
 
     private void replaceLabels(String issueId, List<String> rawLabels) {

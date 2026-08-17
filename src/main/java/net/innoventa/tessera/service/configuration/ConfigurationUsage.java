@@ -13,6 +13,7 @@ import net.innoventa.tessera.dto.configuration.ConfigurationUsageReport.Holder;
 import net.innoventa.tessera.dto.configuration.ProjectReference;
 import net.innoventa.tessera.dto.configuration.SchemeUsageReport;
 import net.innoventa.tessera.repository.BoardColumnStatusRepository;
+import net.innoventa.tessera.repository.CommentRepository;
 import net.innoventa.tessera.repository.CountByKey;
 import net.innoventa.tessera.repository.IssueLinkRepository;
 import net.innoventa.tessera.repository.IssueRepository;
@@ -63,6 +64,7 @@ public class ConfigurationUsage {
 
     private final IssueRepository               issueRepository;
     private final IssueLinkRepository           issueLinkRepository;
+    private final CommentRepository             commentRepository;
     private final BoardColumnStatusRepository   boardColumnStatusRepository;
     private final TransitionRepository          transitionRepository;
     private final WorkflowRepository            workflowRepository;
@@ -94,6 +96,18 @@ public class ConfigurationUsage {
 
         return report(links == 0 ? null
             : Holder.of("issueLinks", links, links + " issue " + plural("link", links)));
+    }
+
+    /**
+     * ⚠️ The holder is <strong>comments</strong>, not issues — which is why this cannot reuse
+     * {@link #issuesHolding}. Naming projects would mean joining every comment back to its issue to say
+     * something an administrator deleting a label does not need; the count is the whole answer.
+     */
+    public ConfigurationUsageReport ofCommentTopic(String commentTopicId) {
+        long comments = commentRepository.countByTopicId(commentTopicId);
+
+        return report(comments == 0 ? null
+            : Holder.of("comments", comments, comments + " " + plural("comment", comments)));
     }
 
     // ── Statuses ──────────────────────────────────────────────────────────────
@@ -299,7 +313,7 @@ public class ConfigurationUsage {
     // ── Bulk, for the Administration screen ───────────────────────────────────
 
     /**
-     * Every catalog's issue counts in five queries rather than one per row.
+     * Every catalog's counts in six queries rather than one per row.
      *
      * <p>The screen shows a number beside every status and every issue type at once. Asking
      * {@link #ofStatus} per row would be correct and would turn a catalog of thirty into sixty round
@@ -312,11 +326,12 @@ public class ConfigurationUsage {
             tally(issueRepository.countIssuesByIssueType()),
             tally(issueRepository.countIssuesByPriority()),
             tally(issueRepository.countIssuesByResolution()),
-            tally(issueLinkRepository.countLinksByLinkType()));
+            tally(issueLinkRepository.countLinksByLinkType()),
+            tally(commentRepository.countCommentsByTopic()));
     }
 
     /**
-     * How many issues (or links) each catalog row holds, by row id.
+     * How many issues (or links, or comments) each catalog row holds, by row id.
      *
      * <p>⚠️ A row nothing holds is <strong>absent rather than zero</strong> — a {@code group by} has no
      * row for an empty group. Readers use {@code getOrDefault(id, 0L)}.
@@ -326,7 +341,8 @@ public class ConfigurationUsage {
         Map<String, Long> issuesByIssueType,
         Map<String, Long> issuesByPriority,
         Map<String, Long> issuesByResolution,
-        Map<String, Long> linksByLinkType
+        Map<String, Long> linksByLinkType,
+        Map<String, Long> commentsByTopic
     ) {
     }
 

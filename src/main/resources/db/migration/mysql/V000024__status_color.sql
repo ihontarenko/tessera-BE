@@ -1,0 +1,26 @@
+SET NAMES utf8mb4 COLLATE utf8mb4_unicode_ci;
+
+-- =============================================================================
+--  V000024  A status carries its own colour (TSSR-21)
+--
+--  Universal SQL: MySQL / PostgreSQL compatible, the two copies byte-identical
+--  bar the utf8mb4 header the MySQL twin needs.
+--
+--  A status pill was drawn from its CATEGORY and never from the status, so two
+--  statuses in one category were the same colour everywhere in the product —
+--  "In Review" and "WIP" are both IN_PROGRESS and could not be told apart.
+--
+--  ⚠️ NULL is the value the seeded statuses keep, and it is not "no colour yet".
+--  It means "drawn from the category", which is what every installation already
+--  looks like. Back-filling the four seeds with hexes would change how every
+--  existing board reads in order to introduce a feature nobody had asked for
+--  yet, and would leave no way back to the default.
+--
+--  VARCHAR(16) and no CHECK, matching priorities.color exactly: the column holds
+--  a CSS colour, which is `#8b5cf6` but is equally `rebeccapurple` or
+--  `hsl(258 90% 66%)`. A CHECK could only recognise the hex spelling, so it
+--  would reject valid values while still passing `#zzzzzz`. What is actually
+--  renderable is a browser's answer; the server does not pretend to know it.
+-- =============================================================================
+
+ALTER TABLE statuses ADD COLUMN color VARCHAR(16) NULL;

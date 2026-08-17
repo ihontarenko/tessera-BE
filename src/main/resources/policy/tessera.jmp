@@ -49,6 +49,27 @@ policy "tessera" {
         issue:delete        "Delete issues"
         comment:write       "Comment on issues, and edit or delete your own"
         sprint:manage       "Create and manage sprints"
+
+        # ⚠️ THE WIKI'S THREE (TSSR-15, TSSR-16), AND THEY ARE THREE RATHER THAN ONE.
+        #
+        # `page:read` is NOT `project:browse`. Everything browsing covers is the work
+        # itself; a wiki is prose beside it, and an installation that wants somebody
+        # on the board and not in the handbook has nowhere to say so while the two
+        # are one permission. Every project role below carries both, so nothing is
+        # narrowed by its existence — what it buys is the ability to take one away.
+        #
+        # `category:manage` is NOT `page:write`. THE TREE IS DELIBERATELY AGNOSTIC:
+        # it holds pages today and is built so a second kind of content costs a
+        # constant rather than a migration. Gating it on the wiki's permission would
+        # tie the general thing to its first consumer, and the second one would then
+        # need `page:write` to make a folder for files. It is not
+        # `project:administer` either: making a section is part of writing a wiki,
+        # not part of administering a project, and requiring an administrator would
+        # mean every new page either lands at the root or waits on somebody else.
+        page:read           "Read the project's wiki"
+        page:write          "Write, re-file and remove wiki pages"
+        category:manage     "Edit the sections the wiki is filed into"
+
         project:administer  "Administer the project — settings, membership, roles, overrides"
 
         # ⚠️ The tenth, and the only one this move adds. A ROLE IS INSTALLATION-WIDE:
@@ -83,6 +104,24 @@ policy "tessera" {
         # of its own. Which model answers, and on whose key, is exactly one of those.
         ai:read             "See what is in force behind the assistant, and what the tools have been asked to do"
         ai:administer       "Choose the model this installation talks to, and hold the key it pays with"
+
+        # ⚠️ The fourteenth, and installation-wide BECAUSE THERE IS NOWHERE ELSE IT
+        # COULD LIVE. Every permission above answers "may you do this HERE"; raising a
+        # project has no here to answer about — the project does not exist yet.
+        #
+        # ⚠️ IT GATES THE MCP TOOL AND NOT THE SCREEN, which is a divergence worth
+        # naming rather than hiding. `ProjectController` still asks for nothing but a
+        # signed-in caller and should keep doing so: narrowing a screen people already
+        # use would be a new rule smuggled in as a fix. The tool is gated because a
+        # project CANNOT BE DELETED THROUGH ANY SURFACE AT ALL, so a mistaken one is
+        # permanent, and a sentence that merely sounded like it wanted a project is
+        # the likeliest way to get one.
+        #
+        # It exists at all because `projects_create` used to declare `project:browse`
+        # — the only permission it could honestly borrow — and borrowing made it
+        # unreachable: `project:browse` comes from the three @PROJECT roles and from
+        # nowhere else, so creating a project required already belonging to one.
+        project:create      "Raise a new project"
     }
 
     # ── The three project roles ───────────────────────────────────────────────
@@ -101,6 +140,10 @@ policy "tessera" {
     declare role PROJECT_VIEWER assignable @PROJECT {
         @PROJECT  project:browse
         @PROJECT  comment:write
+
+        # Reads the handbook, writes none of it — the same relationship it has to the
+        # issues.
+        @PROJECT  page:read
     }
 
     # Works on issues. Everything except deleting one and administering the project
@@ -114,6 +157,13 @@ policy "tessera" {
         @PROJECT  issue:assign
         @PROJECT  issue:transition
         @PROJECT  sprint:manage
+
+        # Writes the wiki and the sections it is filed into. Documenting what you are
+        # building is part of building it, so neither of these waits on an
+        # administrator.
+        @PROJECT  page:read
+        @PROJECT  page:write
+        @PROJECT  category:manage
     }
 
     # Full control of the project, its settings and its membership.
@@ -126,6 +176,9 @@ policy "tessera" {
         @PROJECT  issue:transition
         @PROJECT  issue:delete
         @PROJECT  sprint:manage
+        @PROJECT  page:read
+        @PROJECT  page:write
+        @PROJECT  category:manage
         @PROJECT  project:administer
     }
 
@@ -165,6 +218,20 @@ policy "tessera" {
         @GLOBAL  configuration:administer
         @GLOBAL  ai:read
         @GLOBAL  ai:administer
+
+        # ⚠️ AND `project:create`, for the same reason the two above are here: nothing
+        # assigns a global role from a screen, so a role of its own would sit in the
+        # catalog held by nobody. It stays separable where it matters — it is its own
+        # switch on the access screen, so an installation that wants somebody else
+        # raising projects through the tools takes it off here and grants it
+        # personally, installation-wide.
+        #
+        # ⚠️ THIS DOES NOT MAKE THE ROLE A SUPERUSER. The warning above still holds:
+        # it opens no project, reads no issue and transitions nothing. Creating a
+        # project hands the CREATOR `PROJECT_ADMINISTRATOR` on that project and
+        # nobody else anything, so this grants a way IN to work of one's own making,
+        # never a way into somebody else's.
+        @GLOBAL  project:create
     }
 
     # ⚠️ THE ROLE IS DECLARED HERE AND ASSIGNED IN CODE, unlike Innoventa's, and the

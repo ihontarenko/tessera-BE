@@ -11,6 +11,7 @@ import net.innoventa.tessera.dto.configuration.EstimationSchemeResponse;
 import net.innoventa.tessera.dto.configuration.IssueTypeResponse;
 import net.innoventa.tessera.dto.configuration.IssueTypeSchemeResponse;
 import net.innoventa.tessera.dto.configuration.PriorityResponse;
+import net.innoventa.tessera.dto.configuration.CommentTopicResponse;
 import net.innoventa.tessera.dto.configuration.ResolutionResponse;
 import net.innoventa.tessera.dto.configuration.StatusResponse;
 import net.innoventa.tessera.dto.configuration.TransitionResponse;
@@ -25,6 +26,7 @@ import net.innoventa.tessera.repository.LinkTypeRepository;
 import net.innoventa.tessera.repository.IssueTypeSchemeItemRepository;
 import net.innoventa.tessera.repository.IssueTypeSchemeRepository;
 import net.innoventa.tessera.repository.PriorityRepository;
+import net.innoventa.tessera.repository.CommentTopicRepository;
 import net.innoventa.tessera.repository.ResolutionRepository;
 import net.innoventa.tessera.repository.StatusRepository;
 import net.innoventa.tessera.repository.TransitionRepository;
@@ -53,6 +55,7 @@ public class ConfigurationService {
     private final PriorityRepository priorityRepository;
     private final StatusRepository statusRepository;
     private final ResolutionRepository resolutionRepository;
+    private final CommentTopicRepository commentTopicRepository;
     private final WorkflowRepository workflowRepository;
     private final TransitionRepository transitionRepository;
     private final IssueTypeSchemeRepository issueTypeSchemeRepository;
@@ -71,6 +74,7 @@ public class ConfigurationService {
             statusCategories(),
             statuses(),
             resolutions(),
+            commentTopics(),
             workflows(),
             issueTypeSchemes(),
             workflowSchemes(),
@@ -135,6 +139,10 @@ public class ConfigurationService {
 
     public List<ResolutionResponse> resolutions() {
         return configurationMapper.toResolutionResponses(resolutionRepository.findAllByOrderByNameAsc());
+    }
+
+    public List<CommentTopicResponse> commentTopics() {
+        return configurationMapper.toCommentTopicResponses(commentTopicRepository.findAllByOrderByNameAsc());
     }
 
     public List<WorkflowResponse> workflows() {
