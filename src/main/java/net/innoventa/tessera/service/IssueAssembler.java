@@ -34,7 +34,6 @@ import net.innoventa.tessera.repository.MemberRepository;
 import net.innoventa.tessera.repository.PriorityRepository;
 import net.innoventa.tessera.repository.ResolutionRepository;
 import net.innoventa.tessera.repository.StatusRepository;
-import net.innoventa.tessera.security.access.ProjectAccess;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -67,7 +66,7 @@ public class IssueAssembler {
     private final LinkTypeRepository linkTypeRepository;
     private final WorkflowResolver workflowResolver;
     private final IssueBlockers issueBlockers;
-    private final ProjectAccess projectAccess;
+    private final BrowsableProjects browsableProjects;
 
     // ── Table rows ──────────────────────────────────────────────────────────────
 
@@ -180,7 +179,13 @@ public class IssueAssembler {
         Map<String, LinkType> linkTypes = linkTypeRepository.findAll().stream()
             .collect(Collectors.toMap(LinkType::getId, Function.identity()));
 
-        Set<String> visibleProjectIds = Set.copyOf(projectAccess.visibleProjectIds(caller));
+        // ⚠️ `browsableProjects`, NEVER `projectAccess.visibleProjectIds` directly. That method answers with
+        // an EMPTY list for a caller who browses every project installation-wide — see its javadoc — so
+        // asking it here redacted every link, including links inside the caller's own project, for the one
+        // caller entitled to see the most. Silently, since a redacted reference is a normal answer. This is
+        // the third place that trap has been paid for (`TesseraToolAuthorizer`, `IssueTool` were the others),
+        // which is why the question now lives in one component with the `browsesEveryProject` case inside it.
+        Set<String> visibleProjectIds = Set.copyOf(browsableProjects.idsFor(caller));
 
         List<IssueLinkView> outward = issueLinkRepository.findBySourceIssueId(issue.getId()).stream()
             .map(link -> linkView(link, linkTypes.get(link.getLinkTypeId()), LinkDirection.OUTWARD, link.getTargetIssueId(), visibleProjectIds))

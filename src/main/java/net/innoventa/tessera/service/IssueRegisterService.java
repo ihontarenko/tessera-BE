@@ -71,11 +71,11 @@ public class IssueRegisterService {
             return new IssueRegisterResponse(List.of(), pageNumber, pageSize, 0);
         }
 
-        String type = linkTypeId == null || linkTypeId.isBlank() ? null : linkTypeId;
+        String linkTypeFilter = linkTypeId == null || linkTypeId.isBlank() ? null : linkTypeId;
 
         Page<Issue> found = issueRepository.findRegisters(
             browsableProjectIds,
-            type,
+            linkTypeFilter,
             inward,
             PageRequest.of(pageNumber, pageSize, Sort.by(Sort.Direction.DESC, "updatedAt")));
 
@@ -84,8 +84,13 @@ public class IssueRegisterService {
             .collect(Collectors.toMap(IssueRowResponse::id, Function.identity()));
         Map<String, Project> projectsById = projectsOf(hubs.stream().map(Issue::getProjectId).toList());
 
+        // ⚠️ A register with nothing in it is dropped, and the query cannot prevent it: the query proves a
+        // link row exists, while `linkView` returns null for a link whose *type* row somebody deleted. Left
+        // in, such a hub renders as a heading reading "0 of 0 done" — a group asserting emptiness where the
+        // truth is that its one link cannot be described.
         List<Register> registers = hubs.stream()
-            .map(hub -> new Register(hub, linksOnOneSide(hub, caller, type, inward)))
+            .map(hub -> new Register(hub, linksOnOneSide(hub, caller, linkTypeFilter, inward)))
+            .filter(register -> !register.links().isEmpty())
             .toList();
 
         Map<String, String> projectKeysByIssueKey = projectKeysByIssueKey(registers);

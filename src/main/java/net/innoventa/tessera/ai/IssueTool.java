@@ -22,6 +22,7 @@ import net.innoventa.tessera.exception.BusinessRuleViolationException;
 import net.innoventa.tessera.repository.IssueRepository;
 import net.innoventa.tessera.security.Permissions;
 import net.innoventa.tessera.service.CommentService;
+import net.innoventa.tessera.service.IssueArchiveService;
 import net.innoventa.tessera.security.access.ProjectAccess;
 import net.innoventa.tessera.service.IssueHierarchyService;
 import net.innoventa.tessera.service.IssueLinkService;
@@ -77,6 +78,7 @@ public class IssueTool implements ToolDefinition {
     private final IssueRepository    issueRepository;
     private final IssueHierarchyService hierarchyService;
     private final IssueLinkService   issueLinkService;
+    private final IssueArchiveService archiveService;
     private final ProjectAccess      projectAccess;
     private final ToolMembers        members;
     private final ToolCatalogs       catalogs;
@@ -89,7 +91,7 @@ public class IssueTool implements ToolDefinition {
     @Override
     public List<ToolAction> actions() {
         return List.of(search(), list(), get(), create(), update(), transition(), comment(),
-                       link(), unlink(), relink(), delete());
+                       link(), unlink(), relink(), archive(), unarchive(), delete());
     }
 
     // ── The project's own list ───────────────────────────────────────────────────
@@ -432,6 +434,116 @@ public class IssueTool implements ToolDefinition {
                 new CreateIssueLinkRequest(linkTypeId, other.getId()));
 
         return linkAnswer("linked", issue, other, invocation.requiredString("linkType"));
+    }
+
+    // ── Putting it away ──────────────────────────────────────────────────────────
+
+    /**
+     * Filing finished work, over the protocol (TSSR-4 built it for the browser only).
+     *
+     * <p>⚠️ <strong>Its absence was the gap, and it showed as one.</strong> Archiving is how a finished
+     * issue leaves the board, the backlog and the project's list — and with no action for it, a
+     * conversation could resolve twenty issues and then had no way to put a single one away. Tidying up a
+     * long Shipped list meant twenty clicks in a browser, which is exactly the shape of work a protocol
+     * exists to take.
+     *
+     * <p>⚠️ <strong>Gated on {@code EDIT_ISSUE}, the same permission the route asks for</strong> — filing
+     * is an edit to the issue's own state, not a transition (archived is a flag, never a status) and not a
+     * deletion (nothing is destroyed; search and the Shipped screen still find it).
+     *
+     * <p>⚠️ <strong>Not marked destructive, and deliberately not confirmed.</strong> It is reversible by
+     * {@link #unarchive()} and reversed automatically by reopening the issue, so requiring a confirmation
+     * token per issue would make the one job this action exists for — a list of them — unusable. The
+     * record is still resolved, so the ceiling and the preview have something to be about.
+     */
+    private ToolAction archive() {
+        return ToolAction.builder()
+                .toolName(toolName())
+                .name("archive")
+                .title("Put a finished issue away")
+                .description("Files a finished issue: it leaves the board, the backlog and the project's "
+                           + "issue list at once. Nothing is destroyed: the Shipped screen still lists it, "
+                           + "marked as archived. ⚠️ But issues_search does NOT return archived issues, so "
+                           + "once filed it is not findable through this protocol — do not file something "
+                           + "you will need to read again here. ⚠️ Only finished work "
+                           + "can be filed: an issue with no resolution is refused, because hiding work "
+                           + "somebody is still expected to do is what an archive exists to prevent. "
+                           + "Archiving twice is not an error and changes nothing the second time.")
+                .inputSchema(ArgumentSchema.builder()
+                        .scope(ProjectScopeResolver.KIND, "projects_list")
+                        .requiredString("issueKey", "The issue to put away, e.g. TES-42."))
+                .requiredPermission(Permissions.EDIT_ISSUE)
+                .scopeConfined()
+                .affectedRecords(this::selectIssue)
+                .handler(this::handleArchive)
+                .build();
+    }
+
+    private Object handleArchive(ToolInvocation invocation) {
+        String issueKey = invocation.requiredString("issueKey");
+        Issue  issue    = requireIssue(invocation, issueKey);
+
+        // The service's own refusal travels untouched — "only finished work can be archived" names the
+        // issue and what state it is in, and a second copy of that sentence here could disagree with it.
+        // ⚠️ The domain's refusal becomes a REFUSAL, not an exception. "Only finished work can be archived"
+        // is a sentence the caller can act on — resolve it first — and letting it escape would surface as a
+        // failure about an exception instead. This product has already paid for that once: a library port's
+        // refusal arriving as a 500, and a 500 says nothing. `handleTransition` does the same thing.
+        try {
+            IssueResponse archived = archiveService.archive(members.actingSubject(invocation), issue.getId());
+
+            return filedAnswer("archived", archived);
+
+        } catch (BusinessRuleViolationException refused) {
+            throw new ToolRefusedException(RefusalReason.INVALID_ARGUMENT,
+                    refused.getMessage() + " Nothing was changed.");
+        }
+    }
+
+    /** Taking it back out. No rule to satisfy — un-archiving is always allowed, unlike the way in. */
+    private ToolAction unarchive() {
+        return ToolAction.builder()
+                .toolName(toolName())
+                .name("unarchive")
+                .title("Take an issue back out of the archive")
+                .description("Puts a filed issue back on the board, the backlog and the project's list. "
+                           + "Always allowed — and reopening an archived issue does this on its own, so "
+                           + "nothing can be open and invisible at the same time. Un-archiving something "
+                           + "that was never filed is not an error.")
+                .inputSchema(ArgumentSchema.builder()
+                        .scope(ProjectScopeResolver.KIND, "projects_list")
+                        .requiredString("issueKey", "The issue to take back out, e.g. TES-42."))
+                .requiredPermission(Permissions.EDIT_ISSUE)
+                .scopeConfined()
+                .affectedRecords(this::selectIssue)
+                .handler(this::handleUnarchive)
+                .build();
+    }
+
+    private Object handleUnarchive(ToolInvocation invocation) {
+        String issueKey = invocation.requiredString("issueKey");
+        Issue  issue    = requireIssue(invocation, issueKey);
+
+        IssueResponse restored = archiveService.unarchive(members.actingSubject(invocation), issue.getId());
+
+        return filedAnswer("unarchived", restored);
+    }
+
+    /**
+     * The answer both filing actions give.
+     *
+     * <p>⚠️ A {@code LinkedHashMap} rather than {@code Map.of}: a status can be null — a status row
+     * somebody deleted out from under an issue — and {@code Map.of} throws on a null value, which would
+     * turn a successful write into a 500 answering about a `NullPointerException`.
+     */
+    private Map<String, Object> filedAnswer(String verb, IssueResponse issue) {
+        Map<String, Object> answer = new LinkedHashMap<>();
+
+        answer.put(verb,       true);
+        answer.put("issueKey", issue.issueKey());
+        answer.put("status",   issue.status() == null ? null : issue.status().name());
+
+        return answer;
     }
 
     private ToolAction unlink() {

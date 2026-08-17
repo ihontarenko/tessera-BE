@@ -67,7 +67,8 @@ public interface IssueRepository extends JpaRepository<Issue, String> {
     );
 
     /**
-     * The issues that gather other issues — every one that is the <em>source</em> of a link (TSSR-45).
+     * The issues that sit on one end of a link — the gathering end by default, the gathered end when
+     * {@code inward} (TSSR-45).
      *
      * <p>⚠️ <strong>"Register" is a shape, not a kind of issue.</strong> There is no hub entity and no
      * column saying an issue is one — TSSR-43 turned that option down deliberately — so this asks the only
