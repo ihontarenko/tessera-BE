@@ -4,7 +4,6 @@ import lombok.RequiredArgsConstructor;
 import net.innoventa.tessera.domain.BoardScopeStrategy;
 import net.innoventa.tessera.dto.project.CreateProjectRequest;
 import net.innoventa.tessera.dto.project.ProjectResponse;
-import net.innoventa.tessera.security.Permissions;
 import net.innoventa.tessera.service.ProjectService;
 import org.jmouse.ai.ArgumentSchema;
 import org.jmouse.ai.ToolAction;
@@ -54,7 +53,6 @@ public class ProjectTool implements ToolDefinition {
                            + "they belong to — a project they are not a member of does not appear here "
                            + "and cannot be named.")
                 .inputSchema(ArgumentSchema.none())
-                .requiredPermission(Permissions.BROWSE_PROJECT)
                 .readOnly()
                 .handler(this::handleList)
                 .build();
@@ -79,7 +77,6 @@ public class ProjectTool implements ToolDefinition {
                            + "something to assume.")
                 .inputSchema(ArgumentSchema.builder()
                         .scope(ProjectScopeResolver.KIND, "projects_list"))
-                .requiredPermission(Permissions.BROWSE_PROJECT)
                 .readOnly()
                 .scopeConfined()
                 .handler(this::handleGet)
@@ -140,7 +137,6 @@ public class ProjectTool implements ToolDefinition {
                                 "One emoji standing for the project in every list — 🚀, 📦. Omit for "
                               + "none; anything that is not a single emoji is refused.")
                         .confirm())
-                .requiredPermission(Permissions.CREATE_PROJECT)
                 .handler(this::handleCreate)
                 .build();
     }

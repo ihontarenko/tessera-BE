@@ -36,8 +36,8 @@ public record ProjectResponse(
     EstimationSchemeResponse estimationScheme,
     String keyStrategy,
     String keyPattern,
-    /** Which WiQ section this project's wiki lives in, or null where nobody has chosen one. */
-    String wiqRootCategoryId,
+    /** Which Kiwi section this project's wiki lives in, or null where nobody has chosen one. */
+    String kiwiRootCategoryId,
     List<String> myPermissions,
     LocalDateTime createdAt,
     LocalDateTime updatedAt

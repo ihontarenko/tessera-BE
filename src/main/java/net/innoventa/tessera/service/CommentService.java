@@ -3,6 +3,7 @@ package net.innoventa.tessera.service;
 import lombok.RequiredArgsConstructor;
 import net.innoventa.tessera.domain.Comment;
 import net.innoventa.tessera.domain.CommentTopic;
+import net.innoventa.tessera.service.member.Authorship;
 import net.innoventa.tessera.security.CallingAgent;
 import org.jmouse.ai.agent.Agent;
 import net.innoventa.tessera.domain.Issue;
@@ -46,6 +47,7 @@ public class CommentService {
     private final MemberService memberService;
     private final Supplier<String> idGenerator;
     private final CallingAgent callingAgent;
+    private final Authorship authorship;
 
     @Transactional(readOnly = true)
     public List<CommentResponse> list(Jwt jwt, String issueId) {
@@ -67,20 +69,25 @@ public class CommentService {
     public CommentResponse add(Member caller, String issueId, SaveCommentRequest request) {
         Issue issue = requireIssue(issueId);
 
-        // ⚠️ Stamped on creation and never on edit. The agent that wrote a comment is a fact about the
-        // writing; a person correcting a typo afterwards has not made it theirs, and an edit re-stamping
-        // it would erase the one thing the badge exists to say.
+        // ⚠️ THE AUTHOR IS THE AGENT, WHERE ONE WROTE IT (TSSR-34). It used to be the person with the
+        // agent recorded in a column beside them; now it is one reference, resolved through the same
+        // MemberSummary funnel as everybody else — so a comment written by a client carries a name and a
+        // face instead of a badge glued next to somebody who was asleep at the time.
+        //
+        // ⚠️ Stamped on creation and never on edit. Who wrote a comment is a fact about the writing; a
+        // person correcting a typo afterwards has not made it theirs.
+        //
+        // ⚠️ And the owner keeps it: `Authorship.belongsTo` (TSSR-35) is what lets them edit and delete
+        // what their own client wrote. That landed first, deliberately.
         Agent agent = callingAgent.current().orElse(null);
 
         Comment comment = commentRepository.save(Comment.builder()
             .id(idGenerator.get())
             .issueId(issueId)
-            .authorMemberId(caller.getId())
+            .authorMemberId(agent == null ? caller.getId() : agent.id())
             .body(request.body())
             .topicId(requireTopicId(request.topicId()))
             .parentCommentId(requireAnswerableParent(request.parentCommentId(), issueId))
-            .agentId(agent == null ? null : agent.id())
-            .agentName(agent == null ? null : agent.name())
             .build());
 
         return toResponse(comment, caller, issue.getProjectId());
@@ -94,7 +101,10 @@ public class CommentService {
 
         // A member edits only their own comment (ticket 13). ADD_COMMENT is on the route; this is the
         // half an annotation cannot phrase, because it is about whose row this is.
-        if (!comment.getAuthorMemberId().equals(caller.getId())) {
+        // ⚠️ "Mine" is me OR one of my agents (TSSR-35). After the mirror lands, a comment written
+        // through a tool is authored by the AGENT — so an owner would otherwise stop being able to edit
+        // a comment their own client wrote for them, the day this ships.
+        if (!authorship.belongsTo(comment.getAuthorMemberId(), caller)) {
             throw new ForbiddenException("You can only edit your own comment");
         }
 
@@ -116,7 +126,7 @@ public class CommentService {
         Issue issue = requireIssue(issueId);
         Comment comment = requireComment(commentId, issueId);
 
-        boolean isAuthor = comment.getAuthorMemberId().equals(caller.getId());
+        boolean isAuthor = authorship.belongsTo(comment.getAuthorMemberId(), caller);
         boolean isAdministrator = projectAccess.holds(caller, issue.getProjectId(), Permissions.ADMINISTER_PROJECT);
         if (!isAuthor && !isAdministrator) {
             throw new ForbiddenException("You can only delete your own comment");
@@ -139,7 +149,7 @@ public class CommentService {
             .map(MemberSummary::from)
             .orElse(null);
 
-        boolean isAuthor = comment.getAuthorMemberId().equals(caller.getId());
+        boolean isAuthor = authorship.belongsTo(comment.getAuthorMemberId(), caller);
         boolean isAdministrator = projectAccess.holds(caller, projectId, Permissions.ADMINISTER_PROJECT);
 
         CommentTopicSummary topic = comment.getTopicId() == null
@@ -149,7 +159,6 @@ public class CommentService {
         return new CommentResponse(
             comment.getId(),
             author,
-            comment.getAgentName(),
             topic,
             comment.getParentCommentId(),
             comment.getBody(),

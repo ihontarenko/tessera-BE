@@ -5,6 +5,9 @@ import com.tngtech.archunit.core.domain.JavaClasses;
 import com.tngtech.archunit.core.importer.ClassFileImporter;
 import com.tngtech.archunit.core.importer.ImportOption;
 import net.innoventa.tessera.security.access.AiManagementAccess;
+import net.innoventa.tessera.security.access.AttachmentsAccess;
+import net.innoventa.tessera.security.access.AvatarAccess;
+import net.innoventa.tessera.security.access.LiveBlocksAccess;
 import org.jmouse.access.enforcement.ExternalAccessRules;
 import org.junit.jupiter.api.BeforeAll;
 import org.junit.jupiter.api.DisplayName;
@@ -34,7 +37,9 @@ import static org.assertj.core.api.Assertions.assertThat;
 class ForeignControllerAccessTest {
 
     /** Every module whose controllers this application mounts. One entry per adopted library. */
-    private static final List<String> FOREIGN_CONTROLLER_PACKAGES = List.of("org.jmouse.ai.management");
+    private static final List<String> FOREIGN_CONTROLLER_PACKAGES =
+            List.of("org.jmouse.ai.management", "org.jmouse.liveblocks.web", "org.jmouse.avatar",
+                    "org.jmouse.files.management", "org.jmouse.storage.administration");
 
     private static JavaClasses foreignControllers;
 
@@ -48,8 +53,11 @@ class ForeignControllerAccessTest {
     @Test
     @DisplayName("every controller Tessera mounts but did not write is declared about")
     void everyForeignControllerIsDeclaredAbout() {
-        ExternalAccessRules declared = ExternalAccessRules.all(
-                List.of(new AiManagementAccess().aiManagementAccessRules()));
+        ExternalAccessRules declared = ExternalAccessRules.all(List.of(
+                new AiManagementAccess().aiManagementAccessRules(),
+                new LiveBlocksAccess().liveBlocksAccessRules(),
+                new AvatarAccess().avatarAccessRules(),
+                new AttachmentsAccess().attachmentAccessRules()));
 
         List<String> undeclared = foreignControllers.stream()
                 .filter(candidate -> candidate.getSimpleName().endsWith("Controller"))

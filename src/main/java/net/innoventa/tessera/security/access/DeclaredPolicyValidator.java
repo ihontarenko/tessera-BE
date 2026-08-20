@@ -13,24 +13,26 @@ import java.util.TreeSet;
 import java.util.stream.Collectors;
 
 /**
- * Checks {@code policy/tessera.jmp} against {@link Permissions} in <strong>both</strong> directions, and
- * stops the application where they disagree.
+ * Checks that every permission this build asks with is declared, and stops the application otherwise.
  *
  * <p>This is the whole reason writing authorization down is safe rather than merely tidy. A permission
- * is a bare string wherever it is asked about, so a document writing {@code BROWSE_PROJEKT} would load
- * cleanly, bind cleanly, seed a role that carries it, and grant absolutely nothing — with no log line
- * anywhere saying so. Nobody finds that until somebody cannot see a project they are a member of.
+ * is a bare string wherever it is asked about, so a constant reading {@code BROWSE_PROJEKT} would
+ * compile, be asked about on every request, match nothing, and refuse absolutely everybody — with no log
+ * line anywhere saying so. Nobody finds that until somebody cannot see a project they are a member of.
  *
- * <p>Both directions, because the two failures are different and both matter:
+ * <h2>⚠️ One direction now, and the other one would be wrong</h2>
  *
- * <ul>
- *   <li><strong>Declared and unknown.</strong> A name in the file that no constant matches — a typo, or
- *       a permission somebody deleted from the code and forgot in the document. It grants nothing, and
- *       it is the dangerous one.
- *   <li><strong>Known and undeclared.</strong> A constant no line declares. It is not dangerous — the
- *       engine never looks a permission up — but it means the document has stopped being the vocabulary,
- *       and a document that is only <em>most</em> of the truth is one nobody trusts enough to read.
- * </ul>
+ * <p>It used to check both, because the vocabulary existed twice — as constants and as declarations —
+ * and either copy could drift from the other. The documents are now the vocabulary outright:
+ * {@code PermissionCatalog} is read off them by the library, so <em>declared and matching no constant</em>
+ * has stopped being litter and become the normal case. Every {@code tool:} permission in
+ * {@code policy/tools.jmp} has no Java constant at all, because an action's permission is derived from
+ * its own published name.
+ *
+ * <p>What is left is the half that still bites: a constant Java asks with that no line declares. It
+ * exists because {@link Permissions}' constants are how services and {@code @RequiresAccess} name a
+ * permission — a bare string at a call site is a typo waiting to grant nothing — and those constants are
+ * the one part of the old arrangement that could not sensibly move into a file.
  *
  * <p>⚠️ <strong>{@link InitializingBean} rather than an event listener.</strong> The seed writes rows
  * from this document, so the check has to happen before anything can act on it — and a context that
@@ -48,37 +50,29 @@ public class DeclaredPolicyValidator implements InitializingBean {
                 .map(PolicyPermissionDeclaration::name)
                 .collect(Collectors.toCollection(TreeSet::new));
 
-        Set<String> known = new TreeSet<>(Permissions.all());
+        // ⚠️ ONE DIRECTION NOW, AND THE OTHER ONE WOULD BE WRONG. The documents are the vocabulary —
+        // `PermissionCatalog` is derived from them — so "declared but matching no constant" is no longer
+        // litter, it is the normal case: every `tool:` permission is declared in `policy/tools.jmp` and
+        // has no Java constant at all, because an action's permission is derived from its own name.
+        // What still matters is the reverse: a constant Java asks with that the documents never declare
+        // would be asked about forever and granted by nothing.
+        List<String> missing = Permissions.all().stream()
+                .filter(name -> !declared.contains(name))
+                .toList();
 
-        List<String> unknown = declared.stream().filter(name -> !known.contains(name)).toList();
-        List<String> missing = known.stream().filter(name -> !declared.contains(name)).toList();
-
-        if (unknown.isEmpty() && missing.isEmpty()) {
+        if (missing.isEmpty()) {
             return;
         }
 
-        throw new IllegalStateException(complaint(unknown, missing));
+        throw new IllegalStateException(complaint(missing));
     }
 
-    private String complaint(List<String> unknown, List<String> missing) {
-        StringBuilder complaint = new StringBuilder(
-                "The policy document '" + document.name() + "' and Permissions disagree about what a "
-                + "permission is called, and a permission is a bare string everywhere it is asked "
-                + "about — so a name only one of them knows grants nothing, silently.\n");
-
-        if (!unknown.isEmpty()) {
-            complaint.append("\n  Declared in the document and matching no constant: ")
-                    .append(String.join(", ", unknown))
-                    .append("\n  Either it is a typo, or the constant was deleted and the line was not.");
-        }
-
-        if (!missing.isEmpty()) {
-            complaint.append("\n\n  A constant no line declares: ")
-                    .append(String.join(", ", missing))
-                    .append("\n  Add it to the 'declare permissions' block — the document is the "
-                            + "vocabulary, and one that is only most of the truth is one nobody reads.");
-        }
-
-        return complaint.toString();
+    private String complaint(List<String> missing) {
+        return "The policy document '" + document.name() + "' does not declare every permission this "
+             + "build asks with, and a permission is a bare string everywhere it is asked about — so a "
+             + "name only the code knows is asked about forever and granted by nothing, silently.\n"
+             + "\n  Asked with in Java and declared by no line: " + String.join(", ", missing)
+             + "\n  Add it to a 'declare permissions' block. The documents are the vocabulary: "
+             + "PermissionCatalog is read off them, so a name that is not there does not exist.";
     }
 }

@@ -1,0 +1,169 @@
+# One tool, one permission.
+#
+# Every action the protocol publishes has exactly one permission, named after the action itself:
+# `issues_create` costs `tool:issues_create` and nothing else. So administering an agent is TICKING
+# TOOLS — open it, switch on all of them or a few, and there is nothing else to fill in. No project
+# role, no product permission, nothing shaped like a person is ever hung on an agent.
+#
+# ⚠️ THESE ARE NOT THE PRODUCT'S PERMISSIONS AND DO NOT OVERLAP THEM. `tessera.jmp` declares what a
+# person may do — `issue:create`, `project:browse` — and those still gate every HTTP route and every
+# screen. Nothing on the tool path asks them any more. The two documents are two surfaces, not two
+# halves of one check.
+#
+# ⚠️ A TOOL PERMISSION SAYS WHICH ACTION MAY BE REACHED, NEVER WHICH ROWS. Which rows is decided
+# downstream by the same subject — `ProjectScopeResolver` and every listing filter on its
+# `project:browse` — so the two questions never meet:
+#
+#     which tools    → this file
+#     which data     → the subject's ordinary project access
+#
+# An INHERITED agent therefore works with the owner's projects and nothing of its own; a RESTRICTED
+# one needs whatever ordinary permissions it is meant to work with, granted to it directly. A
+# restricted agent holding only tools sees no project at all, and that is not a bug — it is what
+# "restricted" means here.
+#
+# ⚠️ WHOSE SWITCHES ARE READ IS THE AGENT'S AUTHORITY, AND THE TWO ANSWERS DIFFER.
+#   RESTRICTED  — the agent's own, and its own alone. Not capped by the owner: an agent may hold
+#                 what the person it acts for does not.
+#   INHERITED   — literally the owner's. If the owner holds no `tool:` permission, neither does the
+#                 agent, because the agent IS them for the length of the call.
+# `AgentCallers` decides that once, in the library, and everything downstream sees one ordinary
+# subject it does not have to interpret.
+#
+# ⚠️ THIS FILE IS THE ONLY PLACE THESE NAMES ARE WRITTEN. A tool declares its arguments and its
+# handler and says nothing about authorization: `ToolAction.Builder` derives `tool:<published name>`
+# from the name the action already has. So there is no Java constant to keep in step, no second list,
+# and no way for a copy-pasted action to quietly ask for its neighbour's permission.
+#
+# ⚠️ FORGETTING A LINE HERE STOPS THE APPLICATION, and that is the whole safety of the arrangement.
+# `ToolCatalog` refuses to build over a vocabulary that lacks what its actions ask for — an action
+# published with a permission nobody can hold would be visible to a model, planned with, and refused
+# on the last step forever. The refusal names the action, names the permission, and prints the line
+# to add.
+#
+# ⚠️ These are the PUBLISHED names — the tool and the action joined with an underscore, exactly as a
+# client sees them. The dotted form (`issues.create`) is what refusals and log lines say, so a trail
+# and this file deliberately do not read alike.
+#
+# ⚠️ A SEPARATE FILE rather than more lines in `tessera.jmp`, and it is listed as its own entry under
+# `jmouse.access.policy.locations`. The split is what says, structurally, that these govern a different
+# surface rather than being more of the product's own vocabulary.
+
+policy "tessera/tools" {
+
+    declare permissions {
+        # Projects
+        tool:projects_list             "List projects through a tool"
+        tool:projects_get              "Read one project through a tool"
+        tool:projects_create           "Raise a project through a tool"
+
+        # Issues
+        tool:issues_list               "List a project's issues in ranked order, through a tool"
+        tool:issues_get                "Read one issue through a tool"
+        tool:issues_search             "Search issues by summary through a tool"
+        tool:issues_create             "Raise an issue through a tool"
+        tool:issues_update             "Change an issue's fields through a tool"
+        tool:issues_assign             "Say who is working on an issue, through a tool"
+        tool:issues_transition         "Move an issue through the workflow, through a tool"
+        tool:issues_comment            "Comment on an issue through a tool"
+        tool:issues_attach             "Attach a file to an issue through a tool"
+        tool:issues_delete             "Delete an issue through a tool"
+
+        # Issues — the links between them
+        tool:issues_link               "Link two issues through a tool"
+        tool:issues_unlink             "Remove a link between two issues, through a tool"
+        tool:issues_relink             "Change a link's type through a tool"
+
+        # Issues — filing finished work away
+        tool:issues_archive            "File a resolved issue away through a tool"
+        tool:issues_archive_completed  "File every resolved issue away at once, through a tool"
+        tool:issues_unarchive          "Bring a filed issue back through a tool"
+
+        # Boards
+        tool:boards_list               "List a project's boards through a tool"
+        tool:boards_read               "Read a board's columns and cards through a tool"
+
+        # Sprints
+        tool:sprints_list              "List a project's sprints through a tool"
+        tool:sprints_read              "Read one sprint through a tool"
+        tool:sprints_create            "Plan a sprint through a tool"
+        tool:sprints_add_issue         "Put an issue into a sprint through a tool"
+        tool:sprints_remove_issue      "Take an issue out of a sprint through a tool"
+    }
+
+    # EVERY TOOL AT ONCE, as one switch — the ordinary set, for an agent somebody trusts with the lot.
+    #
+    # ⚠️ A CONVENIENCE, NOT THE MECHANISM. Each permission above is its own switch and can be granted
+    # on its own; this bundle exists so that "give it everything" is one click rather than twenty-odd.
+    # An agent that should hold three tools holds three tools and no bundle.
+    #
+    # ⚠️ `tool:issues_assign` IS IN, AND IT IS THE FIRST ONE WHOSE EFFECT IS ABOUT PEOPLE rather than
+    # about the work. It is here because an agent that takes a ticket and leaves it held by nobody makes
+    # the board lie about who is doing what — the same failure as leaving the status behind. What makes
+    # it safe to hand out is not this file: `IssueService.resolveAssignee` refuses a client naming
+    # anybody but itself, so the only thing this switch ever lets an agent do is take work in its own
+    # name.
+    #
+    # ⚠️ ASSIGNABLE @GLOBAL, and that is not the same as acting globally. WHICH tools is this file's
+    # answer; WHERE they may be pointed is the owner's, per project, resolved by everything downstream.
+    # Confining the tool axis per project as well would be a second place to say the same thing, and the
+    # two would disagree the first time somebody edited one.
+    #
+    # ⚠️ EXISTING AGENTS STOP WORKING UNTIL THEY ARE GIVEN TOOLS. Before this file an agent authorized
+    # on the product's own permissions and every connected client worked by default. Now an agent holds
+    # exactly the tools somebody switched on, and a fresh one holds none — which is the point, and is
+    # the one migration step this change costs. The refusal says so in those words and mentions neither
+    # projects nor roles, because neither is involved.
+    #
+    # ⚠️ There is deliberately no ASSISTANT_USER bundle beside this one, unlike Innoventa. Tessera's
+    # in-application assistant runs under a person's own session, so the tools it may reach are the tool
+    # permissions that person holds — the same list, read off the same place. A second bundle would be a
+    # role nobody is assigned, and an empty distinction on a screen is worse than no distinction.
+    declare role MCP_AGENT_TOOLS assignable @GLOBAL {
+        @GLOBAL  tool:projects_list
+        @GLOBAL  tool:projects_get
+        @GLOBAL  tool:projects_create
+
+        @GLOBAL  tool:issues_list
+        @GLOBAL  tool:issues_get
+        @GLOBAL  tool:issues_search
+        @GLOBAL  tool:issues_create
+        @GLOBAL  tool:issues_update
+        @GLOBAL  tool:issues_assign
+        @GLOBAL  tool:issues_transition
+        @GLOBAL  tool:issues_comment
+        @GLOBAL  tool:issues_attach
+
+        @GLOBAL  tool:issues_link
+        @GLOBAL  tool:issues_unlink
+        @GLOBAL  tool:issues_relink
+
+        @GLOBAL  tool:issues_archive
+        @GLOBAL  tool:issues_unarchive
+
+        @GLOBAL  tool:boards_list
+        @GLOBAL  tool:boards_read
+
+        @GLOBAL  tool:sprints_list
+        @GLOBAL  tool:sprints_read
+        @GLOBAL  tool:sprints_create
+        @GLOBAL  tool:sprints_add_issue
+        @GLOBAL  tool:sprints_remove_issue
+
+        # ⚠️ TWO ARE MISSING FROM THIS BUNDLE ON PURPOSE, and they are the two that lose work.
+        #
+        # `tool:issues_delete` — deleting is permanent and takes the comments, links, labels and
+        # history with it, and detaches the children. Tessera has no undo and no trash. A resolution is
+        # what finishing an issue means here; deletion is for something that should never have existed,
+        # which is a judgement rather than a step in a plan.
+        #
+        # `tool:issues_archive_completed` — filing ONE resolved issue away is reversible and reviewable;
+        # filing EVERY resolved issue away in a project is a single call that changes an unbounded
+        # number of rows, and `issues_search` does not return archived issues, so what it touched is
+        # afterwards unfindable through the protocol that touched it. Reversible is not the same as
+        # answerable.
+        #
+        # Both are ordinary permissions and can be granted to an agent one at a time on the agents
+        # screen. What they are not is part of what a client gets by connecting.
+    }
+}

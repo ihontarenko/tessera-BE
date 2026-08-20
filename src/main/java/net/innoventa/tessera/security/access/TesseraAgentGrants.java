@@ -5,7 +5,7 @@ import net.innoventa.tessera.domain.Member;
 import net.innoventa.tessera.domain.Project;
 import net.innoventa.tessera.repository.MemberRepository;
 import net.innoventa.tessera.repository.ProjectRepository;
-import net.innoventa.tessera.security.Permissions;
+import org.jmouse.access.PermissionCatalog;
 import org.jmouse.access.jpa.AccessAdministration;
 import org.jmouse.access.spi.DirectGrant;
 import org.jmouse.access.spi.GrantStore;
@@ -38,9 +38,9 @@ import java.util.Set;
  * roles exist. All three arrive at the port as opaque strings, which is the whole reason one screen can
  * edit an agent in two products that agree on none of it.
  *
- * <p>⚠️ <strong>Everything written here is still capped by the owner, in every scope, on every
- * request.</strong> Granting an agent something its owner does not hold changes nothing — which is why
- * {@link #offerFor} answers the owner's set rather than the installation's.
+ * <p>⚠️ <strong>Nothing here is capped by the owner.</strong> A RESTRICTED agent is its own account —
+ * the engine stopped intersecting it with anybody — so {@link #offerFor} answers the installation's
+ * whole vocabulary, on both axes, and {@link #replace} refuses nothing for exceeding a person.
  */
 @Component
 @RequiredArgsConstructor
@@ -62,6 +62,7 @@ public class TesseraAgentGrants implements AgentGrants {
     private final ProjectAccess        projectAccess;
     private final AccessAdministration access;
     private final GrantStore           grants;
+    private final PermissionCatalog    vocabulary;
 
     @Override
     @Transactional(readOnly = true)
@@ -72,16 +73,21 @@ public class TesseraAgentGrants implements AgentGrants {
     @Override
     @Transactional(readOnly = true)
     public Offer offerFor(String agentId) {
-        Member owner = ownerOf(agentId);
-
-        // ⚠️ The owner's set, never the installation's. An agent granted what its owner does not hold
-        // resolves to nothing and reads, from outside, as the agent being broken.
+        // ⚠️ THE INSTALLATION'S SET, NOT THE OWNER'S — and this is a reversal worth reading, because the
+        // comment here used to say the exact opposite. A RESTRICTED agent is a separate account rather
+        // than a narrowed owner: `AgentCallers` gives it its own identity and the engine no longer
+        // intersects it with anybody's. So an agent may hold what its owner does not — a client trusted
+        // with one destructive action nobody else has, a service account whose owner merely set it up —
+        // and offering only the owner's set would make those impossible to express.
+        //
+        // ⚠️ THE CATALOGUE, WHICH IS THE POLICY DOCUMENTS. Both axes arrive together and neither is
+        // named here: `tessera.jmp` declares what a subject may DO, `tools.jmp` declares one permission
+        // per published tool action, and `PermissionCatalog` is read off the two. So adding a tool adds
+        // a switch to this screen with nothing to change here — which is the whole reason the vocabulary
+        // stopped living in Java.
         return new Offer(
-                Permissions.all().stream()
-                        .filter(permission -> projectAccess.holdsAnywhere(owner, permission))
-                        .sorted()
-                        .toList(),
-                placesOf(projectAccess.visibleProjectIds(owner)),
+                List.copyOf(vocabulary.all()),
+                placesOf(projects.findAll().stream().map(Project::getId).toList()),
                 access.roles().stream()
                         .map(role -> new Role(
                                 role.name(), !Scopes.GLOBAL.equals(role.assignableAt())))
@@ -93,12 +99,15 @@ public class TesseraAgentGrants implements AgentGrants {
     public Held replace(
             String agentId, List<String> permissions, List<Placement> placements, String grantedBy) {
 
-        Member         owner  = ownerOf(agentId);
         Set<String>    wanted = new LinkedHashSet<>(permissions);
         Set<Placement> places = new LinkedHashSet<>(placements);
 
-        refuseBeyondTheOwner(owner, wanted, places);
-
+        // ⚠️ NOTHING IS REFUSED FOR EXCEEDING THE OWNER, and the guard that did it is gone rather than
+        // relaxed. It existed because the engine used to intersect a restricted agent with its owner, so
+        // a grant beyond them resolved to nothing and read as the agent being broken. That intersection
+        // is gone: a restricted agent is its own account, and a set its owner does not hold is a set it
+        // genuinely has. Refusing it here would be this screen enforcing a rule the engine stopped
+        // having.
         replacePermissions(agentId, wanted, grantedBy);
         replacePlacements(agentId, places, grantedBy);
 
@@ -116,37 +125,6 @@ public class TesseraAgentGrants implements AgentGrants {
     @Transactional
     public void revokeAllOf(String agentId) {
         access.revokeAllFor(agentId);
-    }
-
-    /**
-     * ⚠️ Refused rather than silently trimmed to what the owner holds.
-     *
-     * <p>Trimming would leave the screen showing a smaller set than was saved with no explanation, and
-     * the person would reasonably conclude the save failed. Naming the one that is over the line is the
-     * only version of this that teaches the rule.
-     */
-    private void refuseBeyondTheOwner(Member owner, Set<String> permissions, Set<Placement> placements) {
-        permissions.stream()
-                .filter(permission -> !projectAccess.holdsAnywhere(owner, permission))
-                .findFirst()
-                .ifPresent(permission -> {
-                    throw new RefusedException(
-                            "You cannot give an agent '" + permission + "' — the account it acts for does "
-                            + "not hold it, so the grant would resolve to nothing on every call. Nothing "
-                            + "was changed.");
-                });
-
-        List<String> reachable = projectAccess.visibleProjectIds(owner);
-
-        placements.stream()
-                .filter(placement -> placement.placeId() != null)
-                .filter(placement -> !reachable.contains(placement.placeId()))
-                .findFirst()
-                .ifPresent(placement -> {
-                    throw new RefusedException(
-                            "You cannot put an agent in a project its owner cannot reach. Nothing was "
-                            + "changed.");
-                });
     }
 
     private void replacePermissions(String agentId, Set<String> wanted, String grantedBy) {

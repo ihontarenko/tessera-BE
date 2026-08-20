@@ -33,18 +33,30 @@ import net.innoventa.tessera.service.TransitionService;
 import net.innoventa.tessera.service.WorkflowResolver;
 import org.jmouse.ai.AffectedRecords;
 import org.jmouse.ai.ArgumentSchema;
+import org.jmouse.ai.CallerAttributes;
 import org.jmouse.ai.RefusalReason;
 import org.jmouse.ai.ScopeConfinement;
 import org.jmouse.ai.ToolAction;
 import org.jmouse.ai.ToolDefinition;
 import org.jmouse.ai.ToolInvocation;
 import org.jmouse.ai.ToolRefusedException;
+import net.innoventa.tessera.service.file.AttachmentOwners;
+import org.jmouse.files.jpa.ManagedFile;
+import org.jmouse.files.management.FileManagement;
+import org.jmouse.storage.Content;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
+import java.io.ByteArrayInputStream;
+import java.io.IOException;
+import java.nio.file.Files;
+import java.nio.file.Path;
+import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 import java.util.stream.Collectors;
 
 /**
@@ -82,6 +94,16 @@ public class IssueTool implements ToolDefinition {
     private final ProjectAccess      projectAccess;
     private final ToolMembers        members;
     private final ToolCatalogs       catalogs;
+    private final FileManagement     files;
+
+    /**
+     * The one directory {@code issues_attach} may read a file from, or blank to refuse the form entirely.
+     *
+     * <p>Reading this server’s disk on a caller’s word is a capability rather than a convenience, so it
+     * is off until somebody names the directory it is allowed in.</p>
+     */
+    @Value("${tessera.protocol.upload-root:}")
+    private String uploadRoot;
 
     @Override
     public String toolName() {
@@ -90,8 +112,10 @@ public class IssueTool implements ToolDefinition {
 
     @Override
     public List<ToolAction> actions() {
-        return List.of(search(), list(), get(), create(), update(), transition(), comment(),
-                       link(), unlink(), relink(), archive(), unarchive(), delete());
+        return List.of(search(), list(), get(), create(), update(), assign(), transition(), attach(),
+                       comment(),
+                       link(), unlink(), relink(), archive(), archiveCompleted(), unarchive(),
+                       delete());
     }
 
     // ── The project's own list ───────────────────────────────────────────────────
@@ -116,7 +140,6 @@ public class IssueTool implements ToolDefinition {
                                 "Restrict to one person's issues, by the member id a previous answer "
                               + "reported. Omit for everyone's.")
                         .limit(DEFAULT_LIMIT))
-                .requiredPermission(Permissions.BROWSE_PROJECT)
                 .readOnly()
                 .scopeConfined()
                 .handler(this::handleList)
@@ -155,13 +178,13 @@ public class IssueTool implements ToolDefinition {
                 .title("Read one issue")
                 .description("Reads one issue in full — its description, its status, who reported and "
                            + "who it is assigned to, its labels, its links, and what is blocking it. "
-                           + "A link to an issue in a project you cannot browse shows its key only. "
+                           + "A link, parent or child in a project you cannot browse shows its key "
+                           + "only. "
                            + "Read this before editing one, because an update replaces the fields it "
                            + "is given.")
                 .inputSchema(ArgumentSchema.builder()
                         .scope(ProjectScopeResolver.KIND, "projects_list")
                         .requiredString("issueKey", "The issue to read, e.g. TES-42."))
-                .requiredPermission(Permissions.BROWSE_PROJECT)
                 .readOnly()
                 .scopeConfined()
                 .handler(this::handleGet)
@@ -265,10 +288,10 @@ public class IssueTool implements ToolDefinition {
                         .optionalString("parent", "The issue this one belongs under, by key — an epic "
                                       + "for a story, a story for a sub-task. The parent's type must "
                                       + "sit strictly higher in the hierarchy, and a parent that "
-                                      + "cannot hold this type is refused.")
+                                      + "cannot hold this type is refused. A parent whose type spans "
+                                      + "projects — a Hub — may be in another project you belong to.")
                         .optionalNumber("storyPoints", "An estimate, where the team uses them.")
                         .confirm())
-                .requiredPermission(Permissions.CREATE_ISSUE)
                 .scopeConfined()
                 .handler(this::handleCreate)
                 .build();
@@ -306,14 +329,20 @@ public class IssueTool implements ToolDefinition {
     /**
      * The parent an invocation named, as an identifier — or null where it named none.
      *
-     * <p>⚠️ Resolved through {@link #requireIssue}, so a key outside the scope reads as <em>no such
-     * issue</em> rather than as a parent in another project. The hierarchy rule itself is not checked
-     * here: {@code IssueHierarchyService} owns "strictly higher level" and refuses with the reason,
-     * and a second opinion in a tool is a second place for the two to disagree.
+     * <p>⚠️ <strong>Resolved through {@link #requireLinkableIssue}, not {@link #requireIssue}</strong>
+     * (TSSR-56). It used to be confined to the scope, so a key elsewhere read as <em>no such issue</em>
+     * — which was right while a parent had to be in the child's project and became wrong the moment a
+     * Hub could hold work across them. The far end of a link has always resolved this way, and a parent
+     * that may cross is the same question: findable anywhere the caller browses, invisible everywhere
+     * else.
+     *
+     * <p>⚠️ Both rules that constrain it stay where they were. {@code IssueHierarchyService} owns
+     * "strictly higher level" and "same project unless the type spans them", and refuses with the
+     * reason; a second opinion in a tool is a second place for the two to disagree.
      */
     private String parentIdNamedBy(ToolInvocation invocation) {
         return invocation.optionalString("parent")
-                .map(key -> requireIssue(invocation, key).getId())
+                .map(key -> requireLinkableIssue(invocation, key).getId())
                 .orElse(null);
     }
 
@@ -342,14 +371,121 @@ public class IssueTool implements ToolDefinition {
                         .optionalString("priority", "A new priority, by name.")
                         .optionalString("parent", "The issue this one should belong under, by key. Use "
                                       + "it to adopt an existing issue into an epic. The parent's type "
-                                      + "must sit strictly higher in the hierarchy.")
+                                      + "must sit strictly higher in the hierarchy. A parent whose type "
+                                      + "spans projects — a Hub — may be in another project you belong to.")
                         .optionalNumber("storyPoints", "A new estimate.")
                         .confirm())
-                .requiredPermission(Permissions.EDIT_ISSUE)
                 .scopeConfined()
                 .affectedRecords(this::selectIssue)
                 .handler(this::handleUpdate)
                 .build();
+    }
+
+    // ── Who is working on it ─────────────────────────────────────────────────────
+
+    /**
+     * Assigning, as its own action rather than a field on {@link #update()}.
+     *
+     * <p>⚠️ <strong>Because one tool is one permission.</strong> An {@code assignee} argument on
+     * {@code issues_update} would ride on {@code tool:issues_update}, so switching on <em>may edit an
+     * issue</em> would also switch on <em>may decide who works on it</em>. Split, an installation grants
+     * either without the other — which is the whole reason the axis is named per action.
+     *
+     * <p>It matches the domain, which already keeps the two apart: assigning asks
+     * {@link Permissions#ASSIGN_ISSUE} and editing asks {@code EDIT_ISSUE}, and {@link #handleUpdate}
+     * deliberately carries the existing assignee through untouched rather than letting an edit change it.
+     *
+     * <p>⚠️ <strong>Not confirmed, unlike the destructive actions.</strong> Assigning is reversible, it
+     * loses nothing, and a confirmation round-trip on every one would make a board unusable through a
+     * conversation.
+     */
+    private ToolAction assign() {
+        return ToolAction.builder()
+                .toolName(toolName())
+                .name("assign")
+                .title("Assign an issue")
+                .description("Says who is working on an issue. Pass 'me' to take it yourself, a member "
+                           + "id to give it to somebody, or 'none' to leave it unassigned. Nothing else "
+                           + "about the issue changes. ⚠️ An agent is its own member here, so 'me' from "
+                           + "a client means THE AGENT, not the person who owns it. ⚠️ And an agent may "
+                           + "only ever assign work to itself: a client naming anybody else is refused, "
+                           + "because a person assigns people.")
+                .inputSchema(ArgumentSchema.builder()
+                        .scope(ProjectScopeResolver.KIND, "projects_list")
+                        .requiredString("issueKey", "The issue to assign, e.g. TES-42.")
+                        .requiredString("assignee",
+                                "'me' for the caller, a member id a previous answer reported, or 'none' "
+                              + "to clear it."))
+                .scopeConfined()
+                .affectedRecords(this::selectIssue)
+                .handler(this::handleAssign)
+                .build();
+    }
+
+    /**
+     * ⚠️ <strong>Everything except the assignee is read back and written unchanged.</strong>
+     * {@code UpdateIssueRequest} takes the whole editable set and replaces all of it, so a field left
+     * out is a field blanked — the same trap {@link #handleUpdate} works around, and worse here because
+     * nobody asking to assign an issue expects its description to move.
+     *
+     * <p>⚠️ <strong>The agent rule is the domain's and is not repeated here.</strong>
+     * {@code IssueService.resolveAssignee} refuses a client naming anybody but itself, with a sentence
+     * worth reading rather than paraphrasing. A copy of that check in this class would be the kind of
+     * rule that ends up stated twice and enforced once.
+     */
+    private Object handleAssign(ToolInvocation invocation) {
+        Member        acting   = members.actingSubject(invocation);
+        Issue         issue    = requireIssue(invocation, invocation.requiredString("issueKey"));
+        IssueResponse existing = issueService.getByKey(issue.getIssueKey(), acting);
+
+        String        named    = invocation.requiredString("assignee").trim();
+        String        assignee = switch (named.toLowerCase(Locale.ROOT)) {
+            case "me"   -> callingAgentId(invocation).orElseGet(acting::getId);
+            case "none" -> null;
+            default     -> named;
+        };
+
+        IssueResponse updated = issueService.update(
+                acting,
+                issue.getId(),
+                new UpdateIssueRequest(
+                        existing.summary(),
+                        existing.description(),
+                        issue.getPriorityId(),
+                        assignee,
+                        issue.getStoryPoints()));
+
+        Map<String, Object> answer = new LinkedHashMap<>();
+
+        answer.put("assigned", assignee != null);
+        answer.put("issueKey", updated.issueKey());
+        answer.put("assignee", updated.assignee() == null ? "nobody" : updated.assignee().displayName());
+
+        return answer;
+    }
+
+    /**
+     * The agent behind this call, where one is behind it — <strong>who {@code "me"} means</strong>.
+     *
+     * <p>⚠️ <strong>The acting subject is the wrong answer, and it reads like the right one.</strong>
+     * {@link ToolMembers#actingSubject} says <em>whose rows are in view</em>, which for an inheriting
+     * agent is deliberately the owner: correct to authorize with, correct to read with, and wrong to
+     * write into {@code assignee_member_id}. Assigning is a question of <em>whose name goes on the
+     * row</em> — the same question {@code CommentService} and {@code ActivityLogService} already answer
+     * with the agent (TSSR-34) — so taking a ticket used to hand it to a person who was asleep at the
+     * time, and answer {@code "assignee": "SU"} as though that had been the ask (TSSR-74).
+     *
+     * <p>⚠️ <strong>Read from the invocation, never from {@code CallingAgent}.</strong> That class
+     * reaches into {@code SecurityContextHolder}, which is a fact about the thread serving a request and
+     * not about the call; the identity a tool call runs as has already been resolved once, by
+     * {@code TesseraCallerResolver}, and it puts the agent here under <em>both</em> authorities — the
+     * only place it survives under {@code INHERITED}, where the caller identifier is the owner's.
+     *
+     * <p>Empty where a person is at the keyboard, so the in-application assistant is unchanged.
+     */
+    private Optional<String> callingAgentId(ToolInvocation invocation) {
+        return Optional.ofNullable(invocation.caller().attributes().get(CallerAttributes.AGENT_ID))
+                .filter(agentId -> !agentId.isBlank());
     }
 
     private Object handleUpdate(ToolInvocation invocation) {
@@ -415,7 +551,6 @@ public class IssueTool implements ToolDefinition {
                                                   + "installation keeps a short list, e.g. 'Blocks'. "
                                                   + "There is no default: the type is the whole content "
                                                   + "of a link."))
-                .requiredPermission(Permissions.EDIT_ISSUE)
                 .scopeConfined()
                 .handler(this::handleLink)
                 .build();
@@ -472,7 +607,6 @@ public class IssueTool implements ToolDefinition {
                 .inputSchema(ArgumentSchema.builder()
                         .scope(ProjectScopeResolver.KIND, "projects_list")
                         .requiredString("issueKey", "The issue to put away, e.g. TES-42."))
-                .requiredPermission(Permissions.EDIT_ISSUE)
                 .scopeConfined()
                 .affectedRecords(this::selectIssue)
                 .handler(this::handleArchive)
@@ -500,6 +634,71 @@ public class IssueTool implements ToolDefinition {
         }
     }
 
+    /**
+     * Filing a whole project's finished work in one call.
+     *
+     * <h2>⚠️ Raised by Ivan out of what it actually cost</h2>
+     *
+     * <p>Clearing six projects after a long batch took <strong>seventy-three</strong> separate
+     * {@link #archive()} calls, each one resolving the same project again. A protocol exists to take
+     * exactly that shape of work, and an action that can only be called in a loop is a loop the caller
+     * was made to write.
+     *
+     * <h2>⚠️ {@code status} is a filter, never the definition of finished</h2>
+     *
+     * <p>The obvious reading of "archive everything Done" is to match the status name, and that rule
+     * stops being true the day somebody adds <em>Shipped</em> beside it — status names are rows on a
+     * configuration screen. So the service files by <strong>resolution</strong>, which is what
+     * {@link #archive()} has always required, and treats a named status as a narrowing filter on top.
+     * Both actions therefore mean the same thing by "finished".
+     *
+     * <p>⚠️ <strong>Unresolved issues are skipped and counted, not refused.</strong> Failing on the first
+     * open issue would make this unusable in the one situation it exists for — a project that is mostly
+     * finished — and the count is in the answer so nothing is left behind quietly.
+     *
+     * <p>⚠️ <strong>Confirmed, unlike the single-issue action.</strong> That one is one reversible act on
+     * a named issue; this one's whole point is that the caller does not enumerate what it touches, so the
+     * preview is the only place the scope of it can be seen before it happens.
+     */
+    private ToolAction archiveCompleted() {
+        return ToolAction.builder()
+                .toolName(toolName())
+                .name("archive_completed")
+                .title("File everything finished in a project")
+                .description("Files every finished issue in one project at once — each leaves the board, "
+                           + "the backlog and the issue list, and nothing is destroyed. ⚠️ Finished means "
+                           + "CARRYING A RESOLUTION, not sitting in a particular status: an issue with no "
+                           + "resolution is skipped and counted rather than filed, because hiding work "
+                           + "somebody still owes is what an archive exists to prevent. Narrow it with "
+                           + "'status' to file only one column — the resolution rule still applies. "
+                           + "Answers with the keys filed and how many were skipped. ⚠️ Archived issues "
+                           + "are NOT returned by issues_search, so do not file work you will need to read "
+                           + "again through this protocol.")
+                .inputSchema(ArgumentSchema.builder()
+                        .scope(ProjectScopeResolver.KIND, "projects_list")
+                        .optionalString("status",
+                                "Only file issues in this status, e.g. Done. Omit to file everything "
+                              + "finished, whichever status it rests in."))
+                .scopeConfined()
+                .handler(this::handleArchiveCompleted)
+                .build();
+    }
+
+    private Object handleArchiveCompleted(ToolInvocation invocation) {
+        Project project = projectService.requireProject(invocation.scopeId());
+
+        IssueArchiveService.ArchivedBatch batch = archiveService.archiveCompleted(
+                members.actingSubject(invocation), project.getId(), invocation.optionalString("status").orElse(null));
+
+        return Map.of(
+                "project",  batch.projectKey(),
+                "archived", batch.archived(),
+                "count",    batch.archived().size(),
+                // ⚠️ Always present, including as zero. A caller reading a count of filed issues has no
+                // way to tell "nothing was left behind" from "the field is missing" unless it is stated.
+                "skipped",  batch.skipped());
+    }
+
     /** Taking it back out. No rule to satisfy — un-archiving is always allowed, unlike the way in. */
     private ToolAction unarchive() {
         return ToolAction.builder()
@@ -513,7 +712,6 @@ public class IssueTool implements ToolDefinition {
                 .inputSchema(ArgumentSchema.builder()
                         .scope(ProjectScopeResolver.KIND, "projects_list")
                         .requiredString("issueKey", "The issue to take back out, e.g. TES-42."))
-                .requiredPermission(Permissions.EDIT_ISSUE)
                 .scopeConfined()
                 .affectedRecords(this::selectIssue)
                 .handler(this::handleUnarchive)
@@ -558,7 +756,6 @@ public class IssueTool implements ToolDefinition {
                         .requiredString("issueKey", "The issue the link is recorded on, e.g. TES-42.")
                         .requiredString("otherIssueKey", "The issue at the other end.")
                         .requiredString("linkType", "Which relationship to remove, by name."))
-                .requiredPermission(Permissions.EDIT_ISSUE)
                 .scopeConfined()
                 .handler(this::handleUnlink)
                 .build();
@@ -596,7 +793,6 @@ public class IssueTool implements ToolDefinition {
                         .requiredString("otherIssueKey", "The issue at the other end.")
                         .requiredString("linkType", "The relationship as it reads now, by name.")
                         .requiredString("newLinkType", "What it should say instead, by name."))
-                .requiredPermission(Permissions.EDIT_ISSUE)
                 .scopeConfined()
                 .handler(this::handleRelink)
                 .build();
@@ -628,6 +824,86 @@ public class IssueTool implements ToolDefinition {
         return answer;
     }
 
+    // ── Putting a file on one ────────────────────────────────────────────────────
+
+    /**
+     * The one action that carries BYTES.
+     *
+     * <p>An assistant is shown a screenshot of a broken screen, fixes it, files the ticket — and could
+     * not attach the screenshot to the ticket it had just raised, because nothing in the protocol carried
+     * a file. That is the whole of why this exists.</p>
+     *
+     * <p>⚠️ <strong>The same upload the interface makes.</strong> It goes through {@code FileManagement}
+     * exactly as the screen does, so the acceptance policy, the size ceiling, the quota, the audit line
+     * and the entry in the issue's history are the ones already there. A protocol path that could store
+     * what a person could not would be a second policy — and the one nobody is looking at.</p>
+     *
+     * <p>⚠️ <strong>Not confirmed, deliberately.</strong> Attaching adds; it overwrites nothing and takes
+     * nothing away, and the file is removable afterwards from the issue screen. The guard belongs on
+     * {@code issues_delete}, which is where it is.</p>
+     */
+    private ToolAction attach() {
+        return ToolAction.builder()
+                .toolName(toolName())
+                .name("attach")
+                .title("Attach a file to an issue")
+                .description("Puts a file on an issue — a screenshot of a fault, a log, an export. Send "
+                           + "the bytes as 'base64', or 'path' to read one off this server's disk where "
+                           + "the installation allows that. It is the same upload the interface makes, so "
+                           + "the same size and type rules apply, and it appears in the issue's history "
+                           + "like any other change.")
+                .inputSchema(ArgumentSchema.builder()
+                        .scope(ProjectScopeResolver.KIND, "projects_list")
+                        .requiredString("issueKey", "The issue to attach it to, e.g. TES-42.")
+                        .requiredString("name", "What to call it — the filename, including its extension.")
+                        .optionalString("base64", "The bytes, base64-encoded. Give this or 'path', never both.")
+                        .optionalString("path", "A local file to read instead of sending its bytes. Only "
+                                              + "paths under this installation's configured upload root "
+                                              + "are allowed, and the form is refused entirely when none "
+                                              + "is configured.")
+                        .optionalString("contentType", "The media type, when it is not obvious from the name."))
+                .scopeConfined()
+                .handler(this::handleAttach)
+                .build();
+    }
+
+    private Object handleAttach(ToolInvocation invocation) {
+        Issue  issue = requireIssue(invocation, invocation.requiredString("issueKey"));
+        String name  = invocation.requiredString("name");
+        byte[] bytes = bytesOf(invocation);
+
+        // ⚠️ THE UPLOADER IS THE AGENT, NOT ITS OWNER — the same rule V000034 settled for comments:
+        // "the author IS the agent". Written as `actingSubject` this hung every file an assistant
+        // attached on the person who happened to own it, so a board full of work nobody remembers doing
+        // looks exactly like a board where somebody was busy. `callingAgentId` is empty at the in-app
+        // assistant, where the caller and the subject are the same member, so the fallback is not a
+        // special case — it is the ordinary one.
+        String uploader = callingAgentId(invocation)
+                .orElseGet(() -> members.actingSubject(invocation).getId());
+
+        // ⚠️ The size is declared from what actually arrived rather than left unknown: the bytes are
+        // already in memory, so the acceptance policy can refuse an oversized file before anything is
+        // written instead of storing it and reclaiming it afterwards.
+        ManagedFile stored = files.upload(
+                AttachmentOwners.issue(issue.getId()),
+                AttachmentOwners.NAMESPACE,
+                Content.of(name, invocation.optionalString("contentType").orElse(null), bytes.length,
+                           () -> new ByteArrayInputStream(bytes)),
+                name,
+                uploader);
+
+        Map<String, Object> answer = new LinkedHashMap<>();
+
+        answer.put("id",          stored.getId());
+        answer.put("name",        stored.getDisplayName());
+        answer.put("contentType", stored.getStoredFile().getContentType().toString());
+        answer.put("sizeBytes",   stored.getStoredFile().getSizeBytes());
+        answer.put("issueKey",    issue.getIssueKey());
+        answer.put("attached",    true);
+
+        return answer;
+    }
+
     // ── Saying something about one ───────────────────────────────────────────────
 
     private ToolAction comment() {
@@ -648,7 +924,6 @@ public class IssueTool implements ToolDefinition {
                         .optionalString("topic", "What the comment is about, by name — the installation "
                                                + "keeps a short list of them, e.g. 'Code review'. Omit "
                                                + "for an ordinary remark."))
-                .requiredPermission(Permissions.ADD_COMMENT)
                 .scopeConfined()
                 .handler(this::handleComment)
                 .build();
@@ -693,7 +968,6 @@ public class IssueTool implements ToolDefinition {
                         .scope(ProjectScopeResolver.KIND, "projects_list")
                         .requiredString("issueKey", "The issue to delete, e.g. TES-42.")
                         .confirm())
-                .requiredPermission(Permissions.DELETE_ISSUE)
                 .destructive()
                 .scopeConfined()
                 .affectedRecords(this::selectIssue)
@@ -732,7 +1006,6 @@ public class IssueTool implements ToolDefinition {
                                 "Restrict to one person's issues, by the member id a previous answer "
                               + "reported. Omit for everyone's.")
                         .limit(DEFAULT_LIMIT))
-                .requiredPermission(Permissions.BROWSE_PROJECT)
                 .readOnly()
                 .scopeConfined()
                 .handler(this::handleSearch)
@@ -795,7 +1068,6 @@ public class IssueTool implements ToolDefinition {
                               + "name the installation does not offer is refused with the list that "
                               + "would have worked.")
                         .confirm())
-                .requiredPermission(Permissions.TRANSITION_ISSUE)
                 .scopeConfined()
                 .affectedRecords(this::selectIssue)
                 .handler(this::handleTransition)
@@ -938,6 +1210,76 @@ public class IssueTool implements ToolDefinition {
                         "There is no issue '" + issueKey + "' you can see. Use issues_search to find one "
                         + "— it searches every project you belong to, and an issue key is never "
                         + "invented."));
+    }
+
+    /**
+     * The bytes, from whichever of the two forms was used.
+     *
+     * <p>⚠️ <strong>Exactly one, and saying "both" is refused rather than resolved.</strong> Picking a
+     * winner would mean a caller who sent two different files gets one of them silently, and never finds
+     * out which.</p>
+     */
+    private byte[] bytesOf(ToolInvocation invocation) {
+        String encoded = invocation.optionalString("base64").orElse(null);
+        String path    = invocation.optionalString("path").orElse(null);
+
+        boolean hasEncoded = encoded != null && !encoded.isBlank();
+        boolean hasPath    = path != null && !path.isBlank();
+
+        if (hasEncoded == hasPath) {
+            throw new ToolRefusedException(RefusalReason.INVALID_ARGUMENT,
+                    "Send the file one way: 'base64' with the bytes in it, or 'path' pointing at a local "
+                    + "file. Neither was given, or both were.");
+        }
+
+        if (hasEncoded) {
+            try {
+                return Base64.getDecoder().decode(encoded.trim());
+            } catch (IllegalArgumentException malformed) {
+                throw new ToolRefusedException(RefusalReason.UNPARSEABLE_VALUE,
+                        "'base64' is not base64. Send the file's bytes encoded, with no data: prefix.");
+            }
+        }
+
+        return readFromDisk(path.trim());
+    }
+
+    /**
+     * A file from the server's own disk — and only from underneath the configured root.
+     *
+     * <p>⚠️ <strong>The root is resolved and the target is compared against the resolved form</strong>, so
+     * {@code ../} climbs out of nothing. A prefix check against the raw string is the version of this that
+     * looks right and is not.</p>
+     *
+     * <p>⚠️ And the whole form is <strong>off unless configured</strong>. Reading this server's disk on a
+     * caller's word is a capability rather than a convenience: unset, it refuses and says so.</p>
+     */
+    private byte[] readFromDisk(String path) {
+        if (uploadRoot == null || uploadRoot.isBlank()) {
+            throw new ToolRefusedException(RefusalReason.MISSING_PERMISSION,
+                    "This installation does not read files from disk. Send the bytes as 'base64' instead "
+                    + "— or set 'tessera.protocol.upload-root' to the one directory uploads may come from.");
+        }
+
+        Path root   = Path.of(uploadRoot).toAbsolutePath().normalize();
+        Path target = Path.of(path).toAbsolutePath().normalize();
+
+        if (!target.startsWith(root)) {
+            throw new ToolRefusedException(RefusalReason.MISSING_PERMISSION,
+                    "That path is outside the directory this installation reads uploads from (%s)."
+                            .formatted(root));
+        }
+
+        if (!Files.isRegularFile(target)) {
+            throw new ToolRefusedException(RefusalReason.NOTHING_TO_ACT_ON, "There is no file at " + target + ".");
+        }
+
+        try {
+            return Files.readAllBytes(target);
+        } catch (IOException unreadable) {
+            throw new ToolRefusedException(RefusalReason.NOTHING_TO_ACT_ON,
+                    "That file could not be read: " + unreadable.getMessage());
+        }
     }
 
     private Issue requireIssue(ToolInvocation invocation, String issueKey) {

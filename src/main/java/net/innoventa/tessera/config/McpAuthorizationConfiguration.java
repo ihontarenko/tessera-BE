@@ -1,9 +1,9 @@
 package net.innoventa.tessera.config;
 
 import lombok.Setter;
-import net.innoventa.tessera.ai.authorization.McpAuthorizationSettings;
+import org.jmouse.ai.mcp.authorization.server.McpAuthorizationProperties;
 import net.innoventa.tessera.ai.authorization.McpCredentialValidator;
-import net.innoventa.tessera.ai.authorization.McpCredentialService;
+import org.jmouse.ai.mcp.authorization.server.AgentCredentials;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Value;
@@ -67,25 +67,18 @@ public class McpAuthorizationConfiguration {
     /** The secret protocol credentials are signed with. Empty means "generate one and warn". */
     private String signingSecret = "";
 
-    /** How long a client may act before renewing. */
-    private Duration accessTokenLifetime = Duration.ofHours(1);
-
-    /** How long it may keep renewing before a person has to approve again. */
-    private Duration refreshTokenLifetime = Duration.ofDays(30);
-
-    /** The address a client reaches this API at — the same one the resource metadata publishes. */
+    /**
+     * The address a client reaches this API at — the same one the resource metadata publishes.
+     *
+     * <p>⚠️ Still read here as well as by the library, because the two validators below are this
+     * product's: the issuer a protocol token must carry is the address this server answers on.
+     */
     @Value("${tessera.security.resource:http://localhost:8100}")
     private String resourceUrl;
 
     /** The audience a protocol credential carries, so it reads like every other token this server sees. */
     @Value("${tessera.security.audience:tessera}")
     private String audience;
-
-    @Bean
-    public McpAuthorizationSettings mcpAuthorizationSettings() {
-        return new McpAuthorizationSettings(
-                resourceUrl, audience, accessTokenLifetime, refreshTokenLifetime);
-    }
 
     @Bean
     public JwtEncoder mcpTokenEncoder(SecretKey mcpSigningKey) {
@@ -102,7 +95,7 @@ public class McpAuthorizationConfiguration {
      * one token is what confines a protocol credential to this endpoint.
      */
     @Bean
-    public JwtDecoder mcpJwtDecoder(SecretKey mcpSigningKey, McpCredentialService credentials) {
+    public JwtDecoder mcpJwtDecoder(SecretKey mcpSigningKey, AgentCredentials credentials) {
         NimbusJwtDecoder decoder = NimbusJwtDecoder.withSecretKey(mcpSigningKey)
                 .macAlgorithm(MacAlgorithm.HS256)
                 .build();

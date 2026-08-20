@@ -2,6 +2,7 @@ package net.innoventa.tessera.service;
 
 import lombok.RequiredArgsConstructor;
 import net.innoventa.tessera.domain.Member;
+import net.innoventa.tessera.domain.MemberKind;
 import net.innoventa.tessera.domain.SystemRole;
 import net.innoventa.tessera.repository.MemberRepository;
 import net.innoventa.tessera.security.Roles;
@@ -62,7 +63,10 @@ public class MemberProvisioner {
 
     @Transactional(propagation = Propagation.REQUIRES_NEW)
     public Member provision(String subject, String displayName, String email) {
-        boolean theFirst = memberRepository.count() == 0;
+        // ⚠️ PEOPLE, not rows (TSSR-32). An agent gets a member row too, and this count decides who is
+        // handed the installation's way back in — an agent provisioned first would otherwise answer a
+        // question about who ARRIVED, and the answer decides who administers everything.
+        boolean theFirst = memberRepository.countByKind(MemberKind.PERSON) == 0;
 
         Member member = memberRepository.save(Member.builder()
             .id(idGenerator.get())

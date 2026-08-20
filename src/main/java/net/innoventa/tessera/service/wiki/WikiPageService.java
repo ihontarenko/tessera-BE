@@ -82,7 +82,7 @@ public class WikiPageService {
      *
      * <p>Exists for one caller: resolving the live-data directives a page contains (TSSR-18). ⚠️ The
      * block engine deliberately takes <strong>text</strong> rather than a page identifier — it does not
-     * know what a page is, which is what keeps it out of the wiki's way when TSSR-19 moves pages to WiQ.
+     * know what a page is, which is what keeps it out of the wiki's way when TSSR-19 moves pages to WiQi.
      * This method is the seam that hands it the text, and it must always be the <em>stored</em> text: a
      * copy sent by the client would make the allowlist the caller's to write.
      */

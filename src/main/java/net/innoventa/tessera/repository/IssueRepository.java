@@ -7,6 +7,7 @@ import org.springframework.data.jpa.repository.JpaRepository;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
+import java.time.LocalDateTime;
 import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
@@ -205,4 +206,61 @@ public interface IssueRepository extends JpaRepository<Issue, String> {
            + "group by parent.issueTypeId, child.issueTypeId")
     List<IssueTypePairCount> countParentChildTypePairs();
 
+    // ── The dashboard's aggregates (TSSR-0087) ──────────────────────────────────
+    //
+    // ⚠️ Every one of these takes the caller's browsable project ids and is meaningless without them.
+    // An aggregate is the shape in which a tracker leaks: a total says how much exists without naming
+    // any of it, which is exactly the thing project isolation is for.
+
+    /**
+     * When each issue in these projects was raised, since a moment — the input to a per-day count.
+     *
+     * <p>⚠️ <strong>Timestamps rather than a grouped count, on purpose.</strong> Bucketing by day in
+     * SQL means a date function, and MySQL and PostgreSQL do not spell those the same; this codebase
+     * targets both. A week of one installation's issues is a short list, and Java can put a
+     * {@code LocalDateTime} in the right bucket in a way that is the same on both dialects and can be
+     * read without knowing which one is underneath.
+     */
+    @Query("select issue.createdAt from Issue issue "
+           + "where issue.projectId in :projectIds and issue.createdAt >= :from")
+    List<LocalDateTime> createdAtSince(
+        @Param("projectIds") List<String> projectIds, @Param("from") LocalDateTime from);
+
+    long countByProjectIdInAndResolvedAtGreaterThanEqual(List<String> projectIds, LocalDateTime from);
+
+    /**
+     * Each project's live issues, split into the three status categories — the progress meter, in one
+     * query rather than one per project.
+     *
+     * <p>An entity join on the identifier, like {@link #countParentChildTypePairs}: ids are stored flat
+     * throughout this schema, so the status is joined as a row rather than navigated as an association.
+     *
+     * <p>⚠️ Archived issues are excluded — see {@code ProjectProgress} for why counting them would make
+     * every meter read as almost done for ever.
+     */
+    @Query("select new net.innoventa.tessera.repository.ProjectCategoryCount("
+           + "  issue.projectId, status.category, count(issue)) "
+           + "from Issue issue join Status status on status.id = issue.statusId "
+           + "where issue.projectId in :projectIds and issue.archivedAt is null "
+           + "group by issue.projectId, status.category")
+    List<ProjectCategoryCount> countByProjectAndCategory(@Param("projectIds") List<String> projectIds);
+
+    /** When each issue in these projects was resolved, since a moment — the other half of the flow chart. */
+    @Query("select issue.resolvedAt from Issue issue "
+           + "where issue.projectId in :projectIds and issue.resolvedAt >= :from")
+    List<LocalDateTime> resolvedAtSince(
+        @Param("projectIds") List<String> projectIds, @Param("from") LocalDateTime from);
+
+    /**
+     * Every open issue in these projects — the population the ageing and blocked charts are drawn from.
+     *
+     * <p>⚠️ <strong>"Open" is no resolution, which is the canonical invariant</strong> (ADR-0004) rather
+     * than a status name or a category: a team that finishes work in a status called anything at all
+     * still resolves it. The archived filter beside it is belt and braces the same way {@code
+     * IssueBlockers} explains — only a closed issue may be filed — but here it is cheap and it makes the
+     * intent readable without the reader having to know that rule.
+     */
+    List<Issue> findByProjectIdInAndResolutionIdIsNullAndArchivedAtIsNull(List<String> projectIds);
+
 }
+

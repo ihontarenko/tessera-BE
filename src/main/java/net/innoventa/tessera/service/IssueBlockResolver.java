@@ -32,7 +32,7 @@ import java.util.Optional;
  *
  * <p>⚠️ <strong>It lives here, beside the issues, and not in the wiki.</strong> The block engine has no
  * idea what an issue is and must not learn — that is the whole point of the SPI, and it is what lets
- * TSSR-19 move pages to WiQ while this class stays exactly where it is.
+ * TSSR-19 move pages to WiQi while this class stays exactly where it is.
  *
  * <p>⚠️ <strong>An issue the reader may not see is a miss, indistinguishable from one that does not
  * exist.</strong> Issue keys are guessable — {@code TSSR-1} through {@code TSSR-n} — so a resolver that

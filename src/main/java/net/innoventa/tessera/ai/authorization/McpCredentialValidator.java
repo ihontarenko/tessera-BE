@@ -1,5 +1,6 @@
 package net.innoventa.tessera.ai.authorization;
 
+import org.jmouse.ai.mcp.authorization.server.AgentCredentials;
 import lombok.RequiredArgsConstructor;
 import org.springframework.security.oauth2.core.OAuth2Error;
 import org.springframework.security.oauth2.core.OAuth2TokenValidator;
@@ -21,18 +22,18 @@ import org.springframework.security.oauth2.jwt.Jwt;
  * <p>⚠️ <strong>It also stamps "last used", which is a write from a validator and deliberate.</strong>
  * This is the one place every protocol call demonstrably passes through, and the alternative — a servlet
  * filter of its own beside the transport — would be a second thing to keep in step with the first. The
- * write is rate-limited inside {@link McpCredentialService} so a busy client does not turn every tool call
+ * write is rate-limited inside {@link AgentCredentials} so a busy client does not turn every tool call
  * into an update.
  */
 @RequiredArgsConstructor
 public class McpCredentialValidator implements OAuth2TokenValidator<Jwt> {
 
-    private final McpCredentialService credentials;
+    private final AgentCredentials credentials;
 
     @Override
     public OAuth2TokenValidatorResult validate(Jwt token) {
-        String connectionId = token.getClaimAsString(McpCredentialService.CREDENTIAL_CLAIM);
-        String agentId      = token.getClaimAsString(McpCredentialService.AGENT_CLAIM);
+        String connectionId = token.getClaimAsString(AgentCredentials.CREDENTIAL_CLAIM);
+        String agentId      = token.getClaimAsString(AgentCredentials.AGENT_CLAIM);
 
         if (isBlank(connectionId) || isBlank(agentId)) {
             return refuse("This token does not name both a connection and an agent, so it was not issued "

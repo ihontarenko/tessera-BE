@@ -105,6 +105,19 @@ policy "tessera" {
         ai:read             "See what is in force behind the assistant, and what the tools have been asked to do"
         ai:administer       "Choose the model this installation talks to, and hold the key it pays with"
 
+        # ⚠️ ITS OWN, AND THE NOTE ABOVE IS WHY. `configuration:administer` says in as
+        # many words that an installation-wide concern which is NOT the configuration —
+        # "accounts, licensing, quotas" — should have to ask for a grant of its own
+        # rather than inherit that one. Administering the installation's people and
+        # clients is the first of those to arrive, so it asks.
+        #
+        # ⚠️ IT IS NOT THE MEMBER DIRECTORY. `GET /api/members` stays open to every
+        # signed-in caller — it is the picker somebody adds a colleague to a project
+        # from, and gating it would mean only administrators could name a person. This
+        # gates the SCREEN that administers those rows: renaming a client, changing a
+        # face, seeing whose client is whose.
+        member:administer   "Administer the installation's people and clients — their names and their faces"
+
         # ⚠️ The fourteenth, and installation-wide BECAUSE THERE IS NOWHERE ELSE IT
         # COULD LIVE. Every permission above answers "may you do this HERE"; raising a
         # project has no here to answer about — the project does not exist yet.
@@ -218,6 +231,13 @@ policy "tessera" {
         @GLOBAL  configuration:administer
         @GLOBAL  ai:read
         @GLOBAL  ai:administer
+
+        # ⚠️ AND `member:administer`, for the third time and the same reason: nothing
+        # assigns a global role from a screen, so a role of its own would sit in the
+        # catalog held by nobody. It stays separable where it matters — its own switch
+        # on the access screen, so an installation that wants the people list in other
+        # hands takes it off here and grants it personally.
+        @GLOBAL  member:administer
 
         # ⚠️ AND `project:create`, for the same reason the two above are here: nothing
         # assigns a global role from a screen, so a role of its own would sit in the

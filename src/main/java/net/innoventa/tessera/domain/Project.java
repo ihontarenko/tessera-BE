@@ -78,11 +78,11 @@ public class Project {
     private String keyPattern;
 
     /**
-     * Which WiQ section this project's wiki lives in, or null where nobody has chosen one yet
-     * (WIQ-10; WIQ-1 §3).
+     * Which Kiwi section this project's wiki lives in, or null where nobody has chosen one yet
+     * (KW-10; KW-1 §3).
      *
      * <p>⚠️ <strong>An identifier in ANOTHER SERVICE'S DATABASE.</strong> There is no foreign key and
-     * there cannot be one: WiQ owns the tree, its categories are bare, and this is a consumer naming
+     * there cannot be one: Kiwi owns the tree, its categories are bare, and this is a consumer naming
      * its own root. Which also means the section can be deleted or moved out from under this row
      * without anything here noticing — so a root that no longer resolves is a STATE the screen handles,
      * not an error.
@@ -91,8 +91,8 @@ public class Project {
      * to an administrator and "the wiki is not configured" to everybody else — two empty states,
      * because those are two different situations and one of them is somebody's job.
      */
-    @Column(name = "wiq_root_category_id", length = 36)
-    private String wiqRootCategoryId;
+    @Column(name = "kiwi_root_category_id", length = 36)
+    private String kiwiRootCategoryId;
 
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;

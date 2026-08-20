@@ -1,11 +1,11 @@
 -- =============================================================================
---  V000026  Which WiQ section this project's wiki lives in (WIQ-10; WIQ-1 §3)
+--  V000026  Which WiQi section this project's wiki lives in (WIQ-10; WIQ-1 §3)
 --
 --  Universal SQL: MySQL / PostgreSQL compatible. Identical to the mysql copy
 --  bar its utf8mb4 header.
 --
---  ⚠️ THE CONSUMER CONFIGURES ITS OWN ROOT, AND THAT IS WiQ'S DECISION RATHER
---  THAN A CONVENIENCE. WiQ's categories are BARE — no owner column, no workspace,
+--  ⚠️ THE CONSUMER CONFIGURES ITS OWN ROOT, AND THAT IS WiQi'S DECISION RATHER
+--  THAN A CONVENIENCE. WiQi's categories are BARE — no owner column, no workspace,
 --  nothing naming which product a section belongs to (WIQ-1 §2). Ownership would
 --  have made "only this person may see section X" a rule each product could
 --  interpret differently; instead there is one authority, and a consumer says

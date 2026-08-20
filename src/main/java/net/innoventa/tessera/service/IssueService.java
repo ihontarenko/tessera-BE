@@ -9,12 +9,14 @@ import net.innoventa.tessera.dto.issue.CreateIssueRequest;
 import net.innoventa.tessera.dto.issue.IssueResponse;
 import net.innoventa.tessera.dto.issue.IssueRowResponse;
 import net.innoventa.tessera.dto.issue.UpdateIssueRequest;
+import net.innoventa.tessera.exception.ForbiddenException;
 import net.innoventa.tessera.exception.ResourceNotFoundException;
 import net.innoventa.tessera.repository.CommentRepository;
 import net.innoventa.tessera.repository.IssueLabelRepository;
 import net.innoventa.tessera.repository.IssueLinkRepository;
 import net.innoventa.tessera.repository.IssueRepository;
 import net.innoventa.tessera.repository.PriorityRepository;
+import net.innoventa.tessera.security.CallingAgent;
 import net.innoventa.tessera.security.Permissions;
 import net.innoventa.tessera.security.access.ProjectAccess;
 import org.springframework.security.oauth2.jwt.Jwt;
@@ -56,6 +58,7 @@ public class IssueService {
     private final MemberService memberService;
     private final WorkflowResolver workflowResolver;
     private final RankService rankService;
+    private final CallingAgent callingAgent;
     private final IssueKeyAllocator issueKeyAllocator;
     private final IssueHierarchyService issueHierarchyService;
     private final ActivityLogService activityLogService;
@@ -81,7 +84,11 @@ public class IssueService {
 
         String assigneeMemberId = resolveAssignee(caller, projectId, request.assigneeMemberId());
         if (request.parentId() != null) {
-            issueHierarchyService.validateParent(request.issueTypeId(), request.parentId(), projectId);
+            // ⚠️ The caller-aware overload (TSSR-56). A parent may now sit in another project when its
+            // type spans them, so "can this person see it" stopped being answered by the endpoint's own
+            // authorisation and has to be asked here.
+            issueHierarchyService.requireVisibleParent(
+                caller, request.issueTypeId(), request.parentId(), projectId);
         }
 
         String workflowId = workflowResolver.resolveWorkflowId(project, request.issueTypeId());
@@ -311,12 +318,48 @@ public class IssueService {
      * so expressing this there would mean either refusing every edit to a member who may not assign, or
      * letting an assignment through under {@code EDIT_ISSUE}.
      */
+    /**
+     * Who an issue is assigned to, checked.
+     *
+     * <h2>⚠️ An agent may be an assignee — but only by assigning itself (TSSR-35)</h2>
+     *
+     * <p>Ivan's ruling: <em>people only in the picker, but when it is an agent, it can assign itself.</em>
+     * So "who may be offered" and "who may be stored" stopped being the same set, and this is the one
+     * place that difference is enforced.
+     *
+     * <p>⚠️ <strong>The picker being people-only is not the control.</strong> A client-side list is a
+     * courtesy; without the check below, any caller could put any agent's identifier in the body and
+     * assign somebody else's client — which reads on the board as that person's agent having taken the
+     * work.
+     */
     private String resolveAssignee(Member caller, String projectId, String assigneeMemberId) {
         if (assigneeMemberId == null) {
             return null;
         }
         projectAccess.require(caller, projectId, Permissions.ASSIGN_ISSUE);
-        return memberService.requireMember(assigneeMemberId).getId();
+
+        Member assignee = memberService.requireMember(assigneeMemberId);
+
+        if (assignee.isAgent() && !isTheCallingAgent(assignee)) {
+            throw new ForbiddenException(
+                "An agent can only be assigned work by itself. '" + assignee.getDisplayName()
+                + "' is a client, and a person assigns people.");
+        }
+
+        return assignee.getId();
+    }
+
+    /**
+     * Whether this agent row is the client making the call.
+     *
+     * <p>⚠️ <strong>Read from the request, never from the row's {@code parent_id}.</strong> The mirror's
+     * parent says whose agent it is, which is a different question and one the access core is not
+     * allowed to consult — see the ADR. {@code CallingAgent} reads what is actually calling.
+     */
+    private boolean isTheCallingAgent(Member assignee) {
+        return callingAgent.current()
+            .map(agent -> agent.id().equals(assignee.getId()))
+            .orElse(false);
     }
 
     private String nextRank(String projectId) {

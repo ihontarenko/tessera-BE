@@ -6,11 +6,14 @@ import net.innoventa.tessera.dto.project.CreateProjectRequest;
 import net.innoventa.tessera.dto.project.ProjectIssueTypesResponse;
 import net.innoventa.tessera.dto.project.IssueKeyPreview;
 import net.innoventa.tessera.dto.project.ProjectResponse;
+import net.innoventa.tessera.dto.project.RekeyProjectRequest;
+import net.innoventa.tessera.dto.project.RekeyProjectResponse;
 import net.innoventa.tessera.dto.project.UpdateProjectRequest;
 import net.innoventa.tessera.service.ProjectIssueTypeService;
 import net.innoventa.tessera.security.Permissions;
 import net.innoventa.tessera.security.access.Scopes;
 import net.innoventa.tessera.service.IssueKeyPreviewService;
+import net.innoventa.tessera.service.ProjectRekeyService;
 import net.innoventa.tessera.service.ProjectService;
 import org.jmouse.access.enforcement.RequiresAccess;
 import org.springframework.http.HttpStatus;
@@ -36,6 +39,7 @@ public class ProjectController {
     private final ProjectService projectService;
     private final ProjectIssueTypeService projectIssueTypeService;
     private final IssueKeyPreviewService  issueKeyPreviewService;
+    private final ProjectRekeyService     projectRekeyService;
 
     /**
      * ⚠️ <strong>A bare declaration, and it is the honest one.</strong> There is no project to be scoped
@@ -105,6 +109,29 @@ public class ProjectController {
         @Valid @RequestBody UpdateProjectRequest request
     ) {
         return projectService.update(jwt, projectId, request);
+    }
+
+    /**
+     * Change the project's key, rewriting every issue key under it.
+     *
+     * <p>⚠️ <strong>Separate from {@code PUT} on purpose, and not because the payload differs.</strong>
+     * Everything the update endpoint changes affects what this installation does next; this changes what
+     * a link somebody wrote last year points at. Folding it into the ordinary save would make a rekey
+     * something a screen could do by accident while saving a name — and it is the one project edit whose
+     * whole design is that it cannot happen by accident.
+     *
+     * <p>{@code POST} rather than {@code PUT}: it is not idempotent in any sense a caller can rely on —
+     * sending it twice succeeds once and is then refused, because the confirmation names a key that no
+     * longer exists.
+     */
+    @PostMapping("/{projectId}/key")
+    @RequiresAccess(permission = Permissions.ADMINISTER_PROJECT, scope = Scopes.PROJECT)
+    public RekeyProjectResponse rekey(
+        @AuthenticationPrincipal Jwt jwt,
+        @PathVariable String projectId,
+        @Valid @RequestBody RekeyProjectRequest request
+    ) {
+        return projectRekeyService.rekey(jwt, projectId, request);
     }
 
 }

@@ -69,15 +69,15 @@ spring:
       fail-on-unknown-properties: false
     time-zone: UTC
 
-  # The one multipart route in the whole service is an avatar upload, and the interface has already
-  # cropped and downscaled the image to a 256x256 PNG before it is sent — see UI/src/lib/squareImage.ts.
-  # So these are not a policy, they are a backstop against a client that skipped that step: what a real
-  # avatar weighs is tens of kilobytes, and `tessera.file.max-size-bytes` is the limit that actually
-  # refuses, with a message a person can read. This one only stops the socket.
+  # ⚠️ NO LONGER JUST AVATARS. This used to say "the one multipart route in the whole service is an
+  # avatar upload", which stopped being true when an issue gained attachments (TSSR-49): a screenshot
+  # of a bug is the commonest one and routinely exceeds what a 256x256 avatar weighs. These are still
+  # a socket-level backstop rather than the policy — `tessera.file.max-size-bytes` is the limit that
+  # refuses with a message a person can read, and it is the one to change.
   servlet:
     multipart:
-      max-file-size: ${TESSERA_MULTIPART_MAX_FILE_SIZE:4MB}
-      max-request-size: ${TESSERA_MULTIPART_MAX_REQUEST_SIZE:4MB}
+      max-file-size: ${TESSERA_MULTIPART_MAX_FILE_SIZE:24MB}
+      max-request-size: ${TESSERA_MULTIPART_MAX_REQUEST_SIZE:24MB}
 
 server:
   port: ${TESSERA_SERVER_PORT:8100}
@@ -105,13 +105,47 @@ springdoc:
     tags-sorter: alpha
 
 tessera:
+
+  # ⚠️ THE ONE DIRECTORY `issues_attach` MAY READ A FILE FROM, and it is empty by default.
+  #
+  # Reading this server's disk on a caller's word is a capability rather than a convenience: unset, the
+  # `path` form of the action refuses outright and says so, and only `base64` works. The path is
+  # resolved and compared against the resolved root, so `../` climbs out of nothing.
+  #
+  # Pointed here at where this machine's own assistant uploads land, which is the case it exists for:
+  # somebody hands the assistant a screenshot and it puts that screenshot on a ticket.
+  protocol:
+    upload-root: ${TESSERA_PROTOCOL_UPLOAD_ROOT:}
   security:
-    # The single audience this resource server accepts. A token's `aud` claim must contain this
-    # exact value — the `tessera` client registered in Identity's application.yml stamps it onto
-    # every access token it mints for this app (see SecurityConfiguration.jwtDecoder). Unlike
-    # Central, Tessera is only ever called by its own frontend, so one fixed value, not an
-    # allow-list.
-    audience: ${TESSERA_AUDIENCE:tessera}
+    # The audiences this resource server accepts. A token's `aud` claim must contain one of them.
+    #
+    # ⚠️ THIS USED TO BE ONE FIXED VALUE, on the reasoning "Tessera is only ever called by its own
+    # frontend, so one value, not an allow-list". That stopped being true when Kiwi began quoting
+    # issues: a Kiwi page carrying `:::issue TSSR-4` is drawn by KIWI'S browser, holding the reader's
+    # token with `aud: kiwi`, and Identity stamps exactly ONE audience per registered client.
+    #
+    # ⚠️ THE VALUE WAS `wiqi` UNTIL 2026-08-20 AND EVERY SUCH CALL WAS 401'd (TSSR-0095). The product
+    # was renamed twice on 2026-08-18 — `wiq` → `wiqi` → `kiwi` — and Identity's client now mints
+    # `aud: kiwi`, but this list was never moved with it. Nothing said so: the block on the page draws
+    # the live-blocks library's "this installation has nothing that answers `issue`" plaque, which
+    # blames the namespace row and never mentions a token.
+    #
+    # ⚠️ EVERY ENTRY IS A PRODUCT WHOSE READERS MAY REACH THIS API with the token they already hold.
+    # Adding one widens who this server believes. It is safe because the token is still Identity's,
+    # still signed, still that person's — and every route behind it still asks what THEY may see.
+    # Central has worked this way for the same reason since it existed.
+    accepted-audiences: ${TESSERA_ACCEPTED_AUDIENCES:tessera,kiwi}
+
+    # Origins whose BROWSERS may call this API directly.
+    #
+    # ⚠️ Tessera had no CORS at all until it started being quoted, which was correct while its only
+    # caller was its own interface behind Vite's /api proxy. 5070 is Kiwi's interface; 5010 is
+    # `Innoventa/FE`, the NEW Innoventa interface — not the legacy `Innoventa/UI` on 5173, which is
+    # deliberately not listed because it is not the one that quotes Tessera. INVT-0095 moved FE onto
+    # 5010 rather than moving this value; 5050 is Tessera's own, for a page quoting itself.
+    # ⚠️ AN EMPTY VALUE MEANS NO CROSS-ORIGIN CALLER AT ALL — the previous behaviour, kept reachable
+    # on purpose.
+    allowed-origins: ${TESSERA_ALLOWED_ORIGINS:http://localhost:5070,http://localhost:5010,http://localhost:5050}
 
     # What this server calls itself: the address a client reaches this API at. Published at
     # /.well-known/oauth-protected-resource as both the resource being protected AND the authorization
@@ -150,34 +184,49 @@ tessera:
     # served from wherever they are.
     provider: ${TESSERA_FILE_PROVIDER:local}
     storage-directory: ${TESSERA_FILE_STORAGE_DIR:./uploads}
-    max-size-bytes: ${TESSERA_FILE_MAX_SIZE_BYTES:1048576}
+    # ⚠️ 20 MB, AND IT IS AN ATTACHMENT LIMIT NOW, not an avatar one. It was 1 MB while the only thing
+    # this service accepted was a picture of a person; a screenshot pasted into a bug report clears
+    # that on a large monitor, so the old value would have made the commonest attachment impossible.
+    # The avatar route is not loosened by this at all: it has its own `tessera.avatar.max-size-bytes`,
+    # still 1 MB, and MemberAvatarService narrows the types it accepts on top of that.
+    max-size-bytes: ${TESSERA_FILE_MAX_SIZE_BYTES:20971520}
 
-    # ⚠️ AN ALLOWLIST, AND A NARROW ONE, because unlike Innoventa's file cabinet this accepts exactly
-    # one thing: a picture of a person. Neither shipped profile fits — ALLOW_DOCUMENTS_AND_IMAGES also
-    # admits PDF and Office documents, which an avatar route has no business taking.
+    # ⚠️ NO LONGER "EXACTLY ONE THING: A PICTURE OF A PERSON". That was true while avatars were the
+    # only upload; since TSSR-49 an issue carries attachments, so PDF and Office documents are now the
+    # point rather than the cost — and since TSSR-77 so are notes, logs and exports.
     #
-    # ⚠️ SVG IS ABSENT ON PURPOSE. It is an image by every intuition and a script host by
-    # specification, and /api/public/avatars/** serves its bytes unauthenticated — see
-    # PublicAvatarController for why that route is public and why this is the line that makes it safe.
+    # ⚠️ TEXT IS IN NOW, AND ONLY THE INERT KIND. The old profile refused text/plain and text/markdown,
+    # so the file a developer reaches for most after a screenshot — a log, a note — was the one that
+    # could not be sent. `ALLOW_DOCUMENTS_IMAGES_AND_TEXT` adds txt, md, csv, tsv, json, ndjson, yaml
+    # and log, and nothing that executes.
     #
-    # ⚠️ A SHIPPED PROFILE, BECAUSE `CUSTOM` DOES NOT WORK IN THE LIBRARY AS OF 1.0.0-b20260802.
-    # Writing the lists out by hand fails both ways it can be written: a YAML sequence arrives as
-    # `…content-types[0]`, `[1]`, … and StorageSettingsBinder's name-walk turns those into keys
-    # literally called `contentTypes[0]`, so the allowlist binds EMPTY and every upload is refused
-    # with "File type 'image/png' is not allowed"; a comma-separated string binds far enough to reach
-    # CollectionBinder, which then cannot resolve `Set<String>`'s element type and fails the whole
-    # application at boot with "No binder found for bindable type 'Object'". Innoventa and Moneta
-    # never met either because both use a shipped profile and declare no lists at all.
+    # ⚠️ SVG, HTML, XHTML, XML AND EVERY JAVASCRIPT TYPE ARE STILL ABSENT, BY NAME. That exclusion is
+    # what makes two routes safe rather than lucky: /api/public/avatars/** serves its bytes
+    # unauthenticated, and an attachment is served back to whoever can read the issue. They are text by
+    # encoding and a script host by specification — widening past them is not a cosmetic change, and
+    # this line is the one to revisit if anybody tries.
+    #
+    # ⚠️ `CUSTOM` WORKS NOW, and this comment used to say the opposite at length. The binder defect it
+    # described — a YAML sequence arriving as `contentTypes[0]`, `[1]` and the allow-list binding EMPTY,
+    # or a comma-separated string killing the boot with "No binder found for bindable type 'Object'" —
+    # was fixed in jmouse-core (`getJavaType` plus ValueObjectIntrospector's component type). Verified
+    # here: with `profile: CUSTOM` and a three-entry list, `text/markdown` was accepted and
+    # `application/pdf` refused. So an installation that needs its own list can write one:
+    #
+    #     upload:
+    #       profile: CUSTOM
+    #       mode: ALLOWLIST          # or DENYLIST
+    #       content-types: [image/png, text/markdown]
+    #       extensions: [png, md]
+    #
+    # A named profile is still what Tessera uses, because a hand-written list is a list somebody has to
+    # maintain — and a correction to a shipped one reaches every product that chose it.
     #
     # ⚠️ SO THIS IS THE BRACES AND `MemberAvatarService.ACCEPTED_PICTURE_TYPES` IS THE BELT.
-    # This profile is an allowlist that excludes SVG, HTML and every script host — which is the
-    # property the public byte route actually depends on — but it also admits PDF and Office
-    # documents, which an avatar endpoint has no business taking. Tessera narrows it to raster images
-    # in its own code rather than loosening what the route may serve. Delete that narrowing only
-    # after `CUSTOM` binds.
+    # The avatar endpoint narrows to raster images in its own code rather than this loosening what that
+    # route may serve.
     upload:
-      profile: ALLOW_DOCUMENTS_AND_IMAGES
-
+      profile: ALLOW_DOCUMENTS_IMAGES_AND_TEXT
     # Every avatar is content-addressed, so two people who pick the same picture cost one object.
     content-addressed-keys: ${TESSERA_FILE_CONTENT_ADDRESSED_KEYS:true}
 
@@ -211,8 +260,51 @@ tessera:
       grace-period: ${TESSERA_FILE_SWEEPER_GRACE_PERIOD:24h}
 
 jmouse:
+  # POST /api/blocks/resolve — how another product's document draws a Tessera row.
+  #
+  # ⚠️ THE SWITCH IS NOT CEREMONY. The library mounts the route and gates nothing; what protects it is
+  # this product's authentication, its accepted-audiences and its CORS allowlist above. Publishing the
+  # endpoint on the strength of the jar being on the classpath would open it to anyone who can reach
+  # this application, which is why the library refuses to mount it until somebody says this line.
+  liveblocks:
+    enabled: ${TESSERA_LIVE_BLOCKS_ENABLED:true}
+
+  # A member picture — preset, upload or drawn initials. The rules moved to jmouse-avatars; this row
+  # still owns which of the three is worn.
+  #
+  # ⚠️ THE PUBLIC ROUTE IS OPT-IN, AND THAT IS A SECURITY DECISION RATHER THAN A FLAG.
+  # /api/public/avatars/** is unauthenticated because an <img> tag cannot sign in, and what makes that
+  # safe is `tessera.file.upload.profile` above: an allowlist with no script host in it. The library
+  # cannot know whether this installation still holds that property, so it refuses to mount the route
+  # until this line says so. ⚠️ Widening that profile — for logs on a bug report, say — means revisiting
+  # this line in the same change.
+  avatars:
+    public-route:
+      enabled: ${TESSERA_AVATAR_PUBLIC_ROUTE_ENABLED:true}
+    # Separate from `tessera.file.max-size-bytes` on purpose: an avatar is a strictly smaller thing than
+    # whatever else this installation accepts.
+    max-size-bytes: ${TESSERA_AVATAR_MAX_SIZE_BYTES:1048576}
+
   # jmouse-storage reads its settings from wherever the product already publishes them, so this points
   # it at the `tessera.file.*` keys above rather than inventing a second place to configure storage.
+  # The library's file routes, ON — and this is the one product that takes them rather than writing
+  # its own, because an attachment hangs off an issue and needs no public byte route, no tree-wide
+  # search and no share token.
+  #
+  # ⚠️ SWITCHED ON IN THE SAME CHANGE THAT DECLARES THEIR ACCESS (AttachmentsAccess). The controllers
+  # carry no @RequiresAccess — an annotation would beat the product's own rule — so between the jar
+  # arriving and the rules existing they would be un-gated. That window is what this flag removes.
+  files:
+    management:
+      endpoints:
+        enabled: ${TESSERA_FILE_ENDPOINTS_ENABLED:true}
+      # OFF, and this is a product decision rather than a precaution: an attachment here hangs off the
+      # issue it was dropped onto. There are no folders to arrange, nothing to browse, and no
+      # StorageDirectory this product could resolve to a project — so the tree routes would answer every
+      # call with a refusal that reads as a broken route rather than as an absent feature.
+      directories:
+        enabled: false
+
   storage:
     prefix: tessera.file
     # The sweep's cron lives here rather than under the product prefix: a @Scheduled expression is
@@ -251,10 +343,12 @@ jmouse:
     provider:
       source: database
 
-    # ⚠️ THE MANAGEMENT SCREENS ANSWER AT THE LIBRARY'S OWN DEFAULT, `/jmouse-ai`, ON PURPOSE — every
-    # route under it is visibly not Tessera's, which is the point while this arrangement is new. Moving
-    # them under `/api/ai` is one `management.prefix:` line here plus the matching entry in the Vite
-    # proxy, and nothing else.
+    # ⚠️ THE MANAGEMENT SCREENS ANSWER OUTSIDE `/api`, ON PURPOSE — every route under `prefix` below is
+    # visibly not Tessera's, which is the point while this arrangement is new. The cost is that the
+    # address is written in THREE places that nothing checks against each other: this key, the Vite
+    # proxy entry, and `UI/src/api/ai.ts`'s base path. Drift between them 404s every management call,
+    # and because those screens' queries raise no error of their own, the result reads as an
+    # installation with no tools and no agents rather than as a routing mistake. Change one, change all.
     #
     # ⚠️ Being outside `/api` is not being outside authorization. Spring Security's second chain has no
     # matcher, so `anyRequest().authenticated()` reaches these; and `security/access/AiManagementAccess`
@@ -269,6 +363,11 @@ jmouse:
     # mounted with nothing said about it.
     management:
       enabled: true
+      # ⚠️ Set rather than left at the default, and set to something nobody would invent by accident.
+      # A request log has to be able to say "this handler is the library's" at a glance — the reason the
+      # same controller ended up hand-written in three products is that nothing about its address ever
+      # said where it came from.
+      prefix: /jmai/api
 
     # ⚠️ These were numbers in Java until this product took the starter, and they were numbers in Java
     # only because nothing was binding them. A tracker's bulk operation is a handful of issues rather
@@ -316,6 +415,19 @@ jmouse:
       # A browser round trip plus a client's callback, and not a second more than that needs.
       code-lifetime: ${TESSERA_MCP_CODE_LIFETIME:120s}
 
+      # ⚠️ These three used to be `tessera.mcp.*` fields assembled into a settings bean of this product's
+      # own. They are the library's now (JMF-14) — the class that read them was written three times,
+      # identically. The audience is stated rather than defaulted: an empty one mints a credential no
+      # decoder can be made to refuse, so the library fails to start instead.
+      #
+      # ⚠️ ONE VALUE, AND IT NO LONGER FOLLOWS `tessera.security.*`. It used to read the resource
+      # server's single audience; that property is now `accepted-audiences`, a LIST of who may call
+      # this API — and a credential Tessera MINTS must carry exactly one `aud`, its own. Wiring the
+      # two together again would stamp a protocol credential with somebody else's audience.
+      audience: ${TESSERA_MCP_AUDIENCE:tessera}
+      access-token-lifetime: ${TESSERA_MCP_ACCESS_TOKEN_LIFETIME:1h}
+      refresh-token-lifetime: ${TESSERA_MCP_REFRESH_TOKEN_LIFETIME:30d}
+
       # ⚠️ ON, FOR ONE CLIENT THAT CANNOT BE LISTED. Codex registers a fresh nonce in the path it listens
       # on — http://127.0.0.1:<port>/callback/<nonce> — so there is no spelling of it to add to the
       # allowed paths, and exact matching refused it at registration. What this allows is a client's own
@@ -341,6 +453,11 @@ jmouse:
       name: tessera
       locations:
         - classpath:policy/tessera.jmp
+        # ⚠️ The SECOND axis, in its own document: whether an action may be reached through a tool at
+        # all, as opposed to what the action does. Listed explicitly rather than reached by a glob —
+        # a location that matches nothing refuses to start, which is the failure worth having, and a
+        # pattern silently matching one file fewer is not.
+        - classpath:policy/tools.jmp
 
 logging:
   level:

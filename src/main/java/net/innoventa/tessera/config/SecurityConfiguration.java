@@ -28,15 +28,22 @@ import org.springframework.security.oauth2.server.resource.OAuth2ProtectedResour
 import org.springframework.security.oauth2.server.resource.authentication.JwtAuthenticationConverter;
 import org.springframework.security.web.SecurityFilterChain;
 import net.innoventa.tessera.security.MemberAuthoritiesConverter;
+import org.springframework.web.cors.CorsConfiguration;
+import org.springframework.web.cors.CorsConfigurationSource;
+import org.springframework.web.cors.UrlBasedCorsConfigurationSource;
+
+import java.util.List;
 
 /**
  * Resource-server-only security: Tessera never mints tokens, it validates the ones issued by the
- * Identity service against its JWKS endpoint. Like Innoventa/BE and Moneta/BE — and unlike
- * Innoventa Central, which accepts a whole allow-list of audiences because several products call it
- * — Tessera only ever sees tokens minted for itself, so it enforces a single required audience: the
- * token's {@code aud} claim must contain {@code tessera.security.audience} (default {@code tessera},
- * stamped by the {@code tessera} client registered in Identity's {@code application.yml}). A token
- * minted for Moneta or any other product cannot be replayed here.
+ * Identity service against its JWKS endpoint. It accepts an <strong>allow-list</strong> of audiences —
+ * {@code tessera.security.accepted-audiences}, default {@code tessera} alone — exactly as Innoventa
+ * Central does, and for the same reason: more than one product's browser now calls it. A token minted
+ * for a product not on that list still cannot be replayed here.
+ * <p>
+ * ⚠️ <strong>This used to be a single fixed audience, and the note explaining why is worth keeping:</strong>
+ * "Tessera only ever sees tokens minted for itself". That was true until WiQi began quoting issues on its
+ * pages — see {@code acceptedAudiences} for what changed and what the alternatives were.
  * <p>
  * Authorization (project roles, permissions) stays local to Tessera per Identity's "identity is
  * centralized; authorization is not" contract — none of it lives in the token.
@@ -46,8 +53,35 @@ import net.innoventa.tessera.security.MemberAuthoritiesConverter;
 @EnableMethodSecurity
 public class SecurityConfiguration {
 
-    @Value("${tessera.security.audience:tessera}")
-    private String requiredAudience;
+    /**
+     * ⚠️ <strong>A list, because Tessera is no longer called only by its own frontend.</strong>
+     *
+     * <p>It was one fixed value on the argument that only Tessera's UI ever holds a Tessera token — true
+     * until WiQi started quoting issues. A WiQi page carrying {@code :::issue TSSR-4} is drawn by
+     * <em>WiQi's</em> browser, which holds the reader's token with {@code aud: wiq}, and Identity stamps
+     * exactly one audience per registered client (see {@code SecurityConfiguration}'s customizer there).
+     * So the choice was: accept the caller's own audience, mint tokens valid everywhere, or build
+     * per-resource token acquisition into every interface. Central already resolved this the first way,
+     * for this reason.
+     *
+     * <p>⚠️ <strong>Every entry here is a product whose readers may reach this API with the token they
+     * already hold.</strong> Adding one is not configuration housekeeping — it widens who this server
+     * believes. It stays safe because the token is still Identity's, still signed, still that person's,
+     * and every route behind it still asks what <em>they</em> may see.
+     */
+    @Value("${tessera.security.accepted-audiences:tessera}")
+    private List<String> acceptedAudiences;
+
+    /**
+     * Origins whose browsers may call this API directly.
+     *
+     * <p>⚠️ <strong>Tessera had no CORS at all until it started being quoted.</strong> That was correct
+     * while its only caller was its own interface behind a dev-server proxy; it stopped being correct the
+     * moment another product's page had to draw one of these rows. An empty list keeps the old behaviour
+     * exactly — no {@code Access-Control-Allow-Origin}, and no cross-origin caller.
+     */
+    @Value("${tessera.security.allowed-origins:}")
+    private List<String> allowedOrigins;
 
     /**
      * What this server calls itself: the address a client reaches it at, published as the resource it
@@ -81,7 +115,7 @@ public class SecurityConfiguration {
      * {@code tessera-mcp} in Identity could not help and the registration is now unused.
      *
      * <p>So Tessera issues the protocol's credentials itself, the way Innoventa does — see
-     * {@code McpCredentialService} for what is signed and {@code ClientAuthorizationFlow} for who approves
+     * {@code AgentCredentials} for what is signed and {@code ClientAuthorizationFlow} for who approves
      * it. Identity remains the only thing that authenticates a <em>person</em>: the consent screen is
      * behind an Identity session, so a client is approved by somebody Identity signed in, and Tessera
      * mints nothing for anybody it has not already been told about.
@@ -181,6 +215,10 @@ public class SecurityConfiguration {
 
         httpSecurity
             .csrf(csrf -> csrf.disable())
+            // ⚠️ Without this the live-block route is unreachable no matter what the matchers below say:
+            // a browser on another product's origin is refused by the browser itself, before the request
+            // is made. See corsConfigurationSource for what is allowed and what deliberately is not.
+            .cors(cors -> cors.configurationSource(corsConfigurationSource()))
             .authorizeHttpRequests(authorize -> authorize
                 // This backend serves an API and nothing else. Tessera/UI is a separate application
                 // on its own origin, so there is no shell to let through unauthenticated and no
@@ -267,6 +305,40 @@ public class SecurityConfiguration {
      * {@link JwtDecoder} for the protocol endpoint. This is the general case; that one is reachable only
      * where it is named.
      */
+    /**
+     * Which other origins' browsers may talk to this API.
+     *
+     * <h3>⚠️ Registered on {@code /**}, and narrowed by the allow-list rather than by the path</h3>
+     *
+     * <p>The live-block route is the reason this exists, and confining the configuration to
+     * {@code /api/blocks/**} would read as tighter while being the same thing: an origin is either
+     * trusted with a signed token belonging to the person holding it, or it is not. Every route it could
+     * then reach already asks what that person may see.
+     *
+     * <p>⚠️ <strong>Credentials are off, and must stay off.</strong> These calls carry a bearer token in
+     * a header; allowing cookies would make this server reachable from another origin <em>as whoever is
+     * signed in</em>, which is a different and much worse thing than what is being enabled here.
+     *
+     * <p>⚠️ <strong>An empty allow-list means no cross-origin caller at all</strong>, which is what every
+     * deployment gets until somebody names an origin — the previous behaviour, kept as the default rather
+     * than as an accident.
+     */
+    @Bean
+    CorsConfigurationSource corsConfigurationSource() {
+        CorsConfiguration configuration = new CorsConfiguration();
+
+        configuration.setAllowedOrigins(allowedOrigins);
+        configuration.setAllowedMethods(List.of("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"));
+        configuration.setAllowedHeaders(List.of("Authorization", "Content-Type", "Accept"));
+        configuration.setAllowCredentials(false);
+        configuration.setMaxAge(3600L);
+
+        UrlBasedCorsConfigurationSource source = new UrlBasedCorsConfigurationSource();
+        source.registerCorsConfiguration("/**", configuration);
+
+        return source;
+    }
+
     @Bean
     @Primary
     JwtDecoder jwtDecoder(OAuth2ResourceServerProperties resourceServerProperties) {
@@ -274,10 +346,11 @@ public class SecurityConfiguration {
             .withJwkSetUri(resourceServerProperties.getJwt().getJwkSetUri())
             .build();
 
-        OAuth2TokenValidator<Jwt> audienceValidator = jwt -> jwt.getAudience().contains(requiredAudience)
-            ? OAuth2TokenValidatorResult.success()
-            : OAuth2TokenValidatorResult.failure(new OAuth2Error("invalid_token",
-                "Token audience must contain '" + requiredAudience + "'", null));
+        OAuth2TokenValidator<Jwt> audienceValidator = jwt ->
+            jwt.getAudience().stream().anyMatch(acceptedAudiences::contains)
+                ? OAuth2TokenValidatorResult.success()
+                : OAuth2TokenValidatorResult.failure(new OAuth2Error("invalid_token",
+                    "Token audience must contain one of " + acceptedAudiences, null));
 
         jwtDecoder.setJwtValidator(new DelegatingOAuth2TokenValidator<>(JwtValidators.createDefault(), audienceValidator));
 

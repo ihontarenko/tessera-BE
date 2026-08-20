@@ -7,12 +7,15 @@ import net.innoventa.tessera.domain.Project;
 import net.innoventa.tessera.dto.issue.IssueResponse;
 import net.innoventa.tessera.exception.BusinessRuleViolationException;
 import net.innoventa.tessera.repository.IssueRepository;
+import net.innoventa.tessera.repository.StatusRepository;
 import net.innoventa.tessera.exception.ResourceNotFoundException;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.ArrayList;
+import java.util.List;
 
 /**
  * Putting finished work away, and taking it back out (TSSR-4).
@@ -46,6 +49,7 @@ public class IssueArchiveService {
     private final MemberService memberService;
     private final ActivityLogService activityLogService;
     private final IssueAssembler issueAssembler;
+    private final StatusRepository statusRepository;
 
     @Transactional
     public IssueResponse archive(Jwt jwt, String issueId) {
@@ -77,6 +81,76 @@ public class IssueArchiveService {
             activityLogService.changeSet().added(FIELD_ARCHIVED, issue.getIssueKey()));
 
         return issueAssembler.detail(issue, project, caller);
+    }
+
+    /**
+     * Files everything finished in one project at once.
+     *
+     * <h2>⚠️ Why this exists rather than the caller looping</h2>
+     *
+     * <p>Because the caller looping is what actually happened: clearing six projects after a long batch
+     * took seventy-three separate archive calls, each resolving the same project and writing the same
+     * kind of history row. A protocol exists to take exactly that shape of work.
+     *
+     * <h2>⚠️ It archives by RESOLUTION, not by status name</h2>
+     *
+     * <p>A status is a row on a configuration screen — renamed, reordered, duplicated per workflow — so
+     * "archive everything in Done" is a rule that stops being true the day somebody adds *Shipped*
+     * beside it. A resolution is the thing that actually means <em>this is finished</em>, and it is what
+     * single-issue {@link #archive} already refuses without. Callers naming a status are answered by
+     * resolving the status to its issues, so the two never disagree about what "finished" means.
+     *
+     * <p>⚠️ <strong>Unresolved issues are skipped, never refused.</strong> A bulk act that failed on the
+     * first open issue would be unusable in exactly the situation it is for — a project that is mostly
+     * finished. The answer says how many were skipped, so nothing is silently left behind.
+     *
+     * @param statusName optional; when given, only issues in that status are considered — and they must
+     *                   still be resolved to be filed
+     * @return the keys that were filed, in the order they were found
+     */
+    @Transactional
+    public ArchivedBatch archiveCompleted(Member caller, String projectId, String statusName) {
+        Project project = projectService.requireProject(projectId);
+
+        List<Issue> candidates = issueRepository.findByProjectIdAndArchivedAtIsNullOrderByRankAsc(projectId).stream()
+            .filter(issue -> statusName == null || matchesStatus(issue, statusName))
+            .toList();
+
+        List<String> filed   = new ArrayList<>();
+        int          skipped = 0;
+
+        for (Issue issue : candidates) {
+            if (issue.getResolutionId() == null) {
+                skipped++;
+                continue;
+            }
+
+            issue.setArchivedAt(LocalDateTime.now());
+            issue.setArchivedByMemberId(caller.getId());
+
+            activityLogService.record(issue.getId(), caller.getId(),
+                activityLogService.changeSet().added(FIELD_ARCHIVED, issue.getIssueKey()));
+
+            filed.add(issue.getIssueKey());
+        }
+
+        return new ArchivedBatch(project.getKey(), filed, skipped);
+    }
+
+    /**
+     * What a bulk filing did.
+     *
+     * @param skipped how many were left alone because they carry no resolution — said out loud, because
+     *                "archive everything finished" quietly leaving work behind is the one way this can
+     *                mislead
+     */
+    public record ArchivedBatch(String projectKey, List<String> archived, int skipped) {
+    }
+
+    private boolean matchesStatus(Issue issue, String statusName) {
+        return statusRepository.findById(issue.getStatusId())
+            .map(status -> status.getName().equalsIgnoreCase(statusName))
+            .orElse(false);
     }
 
     @Transactional

@@ -52,7 +52,7 @@ import org.springframework.context.annotation.Configuration;
  * <p><strong>Both halves have changed.</strong> Identity cannot help — it supports no dynamic client
  * registration, and a protocol client has nowhere to be told a client id, so it never got as far as
  * asking. Tessera therefore issues the protocol's credential itself and verifies it on a filter chain of
- * its own: {@code McpCredentialService} for what is signed, {@code ClientAuthorizationFlow} for who
+ * its own: {@code AgentCredentials} for what is signed, {@code ClientAuthorizationFlow} for who
  * approves it, {@code SecurityConfiguration.mcpSecurityFilterChain} for what accepts it, and ADR-0020 for
  * why. The confinement is a signature that does not verify elsewhere rather than a check somewhere.
  *

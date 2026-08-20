@@ -12,6 +12,7 @@ import net.innoventa.tessera.repository.LinkTypeRepository;
 import org.springframework.stereotype.Component;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Collection;
 import java.util.HashMap;
@@ -121,16 +122,39 @@ public class IssueBlockers {
      */
     @Transactional(readOnly = true)
     public Set<String> blockedAmong(Collection<String> issueIds, StatusCategory targetCategory) {
+        return blockagesAmong(issueIds, targetCategory).stream()
+            .map(Blockage::issueId)
+            .collect(Collectors.toSet());
+    }
+
+    /**
+     * The same question as {@link #blockedAmong}, with what a report needs to say about it.
+     *
+     * <p>⚠️ <strong>The two share this traversal rather than each doing their own.</strong> A second
+     * walk over links applying the same three conditions is a second definition of "blocked", and the
+     * day it drifts the board and the dashboard disagree about the same issue — which is exactly the
+     * failure this class was created to prevent, one caller further along.
+     *
+     * <p>⚠️ <strong>Blocker KEYS, never summaries</strong> — see {@link #blocking}. A blocker may sit in
+     * a project the caller cannot open, and a key is enough to go and ask about.
+     *
+     * <p>⚠️ <strong>{@code since} is when the LINK was drawn, not when the blocker was raised.</strong>
+     * "Blocked for three weeks" is a statement about this relationship having been known about for three
+     * weeks, which is the thing somebody can act on. The blocker's own age is a different number and
+     * belongs to the blocker.
+     */
+    @Transactional(readOnly = true)
+    public List<Blockage> blockagesAmong(Collection<String> issueIds, StatusCategory targetCategory) {
         LinkTypeEffect relevant = effectFor(targetCategory);
 
         if (relevant == null || issueIds.isEmpty()) {
-            return Set.of();
+            return List.of();
         }
 
         List<IssueLink> links = issueLinkRepository.findBySourceIssueIdInOrTargetIssueIdIn(issueIds, issueIds);
 
         if (links.isEmpty()) {
-            return Set.of();
+            return List.of();
         }
 
         Map<String, LinkType> linkTypes = linkTypeRepository.findAll().stream()
@@ -138,33 +162,62 @@ public class IssueBlockers {
 
         // The blocked end is the TARGET of a blocking link, so only links pointing into this slice
         // count — one whose target is elsewhere says nothing about any card being rendered.
-        Set<String> candidateIssueIds = new HashSet<>(issueIds);
-        Map<String, Set<String>> blockersByIssue = new HashMap<>();
+        Set<String>             candidateIssueIds = new HashSet<>(issueIds);
+        Map<String, List<IssueLink>> effective    = new HashMap<>();
 
         for (IssueLink link : links) {
             LinkType linkType = linkTypes.get(link.getLinkTypeId());
 
             if (linkType != null && linkType.getEffect() == relevant && candidateIssueIds.contains(link.getTargetIssueId())) {
-                blockersByIssue
-                    .computeIfAbsent(link.getTargetIssueId(), key -> new HashSet<>())
-                    .add(link.getSourceIssueId());
+                effective
+                    .computeIfAbsent(link.getTargetIssueId(), key -> new ArrayList<>())
+                    .add(link);
             }
         }
 
-        if (blockersByIssue.isEmpty()) {
-            return Set.of();
+        if (effective.isEmpty()) {
+            return List.of();
         }
 
-        Set<String> openBlockerIds = issueRepository
-            .findAllById(blockersByIssue.values().stream().flatMap(Set::stream).distinct().toList()).stream()
+        Map<String, Issue> openBlockers = issueRepository
+            .findAllById(effective.values().stream()
+                .flatMap(List::stream).map(IssueLink::getSourceIssueId).distinct().toList()).stream()
             .filter(blocker -> blocker.getResolutionId() == null)
-            .map(Issue::getId)
-            .collect(Collectors.toSet());
+            .collect(Collectors.toMap(Issue::getId, Function.identity()));
 
-        return blockersByIssue.entrySet().stream()
-            .filter(entry -> entry.getValue().stream().anyMatch(openBlockerIds::contains))
-            .map(Map.Entry::getKey)
-            .collect(Collectors.toSet());
+        List<Blockage> blockages = new ArrayList<>();
+
+        for (Map.Entry<String, List<IssueLink>> entry : effective.entrySet()) {
+            List<IssueLink> holding = entry.getValue().stream()
+                .filter(link -> openBlockers.containsKey(link.getSourceIssueId()))
+                .toList();
+
+            if (holding.isEmpty()) {
+                continue;
+            }
+
+            blockages.add(new Blockage(
+                entry.getKey(),
+                holding.stream()
+                    .map(link -> openBlockers.get(link.getSourceIssueId()).getIssueKey())
+                    .sorted()
+                    .toList(),
+                // ⚠️ The EARLIEST of them. An issue held up by two things has been held up since the
+                // first one was drawn, and reporting the latest would restart the clock every time
+                // somebody adds another blocker to work that is already stuck.
+                holding.stream().map(IssueLink::getCreatedAt).min(LocalDateTime::compareTo).orElseThrow()));
+        }
+
+        return blockages;
+    }
+
+    /**
+     * One issue that cannot move, what is holding it, and since when.
+     *
+     * @param blockerKeys the open blockers, by key and sorted — never their summaries
+     * @param since       when the earliest of those links was drawn
+     */
+    public record Blockage(String issueId, List<String> blockerKeys, LocalDateTime since) {
     }
 
     /** The refusal this product would give, or null when nothing is blocking. */

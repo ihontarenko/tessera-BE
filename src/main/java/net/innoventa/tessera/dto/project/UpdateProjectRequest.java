@@ -5,8 +5,12 @@ import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Size;
 
 /**
- * Edit a project's name, lead and schemes (requires {@code ADMINISTER_PROJECT}). The key and type are
- * immutable in Phase 1 — a rekey rewrites every issue key and is deliberately deferred (ADR-0003).
+ * Edit a project's name, lead and schemes (requires {@code ADMINISTER_PROJECT}).
+ *
+ * <p>⚠️ <strong>The key is not here, and that is deliberate rather than left over.</strong> Changing it
+ * rewrites every issue key in the project and kills every link anybody wrote — so it is
+ * {@code POST /api/projects/{id}/key}, behind a typed confirmation, in the settings screen's danger
+ * zone. A field on this request would make it something a screen could do while saving a name.
  */
 public record UpdateProjectRequest(
     @NotBlank @Size(max = 128) String name,
@@ -24,14 +28,14 @@ public record UpdateProjectRequest(
 ,
 
     /**
-     * Which WiQ section this project's wiki lives in — an identifier from ANOTHER service, or null
-     * where nobody has chosen one (WIQ-10; WIQ-1 §3).
+     * Which Kiwi section this project's wiki lives in — an identifier from ANOTHER service, or null
+     * where nobody has chosen one (KW-10; KW-1 §3).
      *
-     * <p>⚠️ <strong>Not validated here, and it cannot be.</strong> The category lives in WiQ's
-     * database; this service has no way to ask whether it exists without becoming a client of WiQ,
-     * which is precisely the backend-to-backend call WIQ-1 §1 refuses. The browser picked it from
-     * WiQ's own tree, and a root that stops resolving is a state the wiki tab handles.
+     * <p>⚠️ <strong>Not validated here, and it cannot be.</strong> The category lives in Kiwi's
+     * database; this service has no way to ask whether it exists without becoming a client of Kiwi,
+     * which is precisely the backend-to-backend call KW-1 §1 refuses. The browser picked it from
+     * Kiwi's own tree, and a root that stops resolving is a state the wiki tab handles.
      */
-    String wiqRootCategoryId
+    String kiwiRootCategoryId
 ) {
 }

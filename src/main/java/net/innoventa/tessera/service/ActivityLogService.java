@@ -50,14 +50,14 @@ public class ActivityLogService {
             return;
         }
 
+        // ⚠️ THE ACTOR IS THE AGENT, WHERE ONE ACTED (TSSR-34) — the same move `CommentService` makes,
+        // and it has to be the same or the two halves of a thread disagree about who did what.
         Agent agent = callingAgent.current().orElse(null);
 
         ActivityLog event = activityLogRepository.save(ActivityLog.builder()
             .id(idGenerator.get())
             .issueId(issueId)
-            .actorMemberId(actorMemberId)
-            .agentId(agent == null ? null : agent.id())
-            .agentName(agent == null ? null : agent.name())
+            .actorMemberId(agent == null ? actorMemberId : agent.id())
             .build());
 
         for (FieldChange change : changeSet.changes()) {

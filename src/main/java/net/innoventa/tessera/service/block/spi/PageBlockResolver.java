@@ -26,7 +26,7 @@ import net.innoventa.tessera.dto.block.PageBlockView;
  * {@code catalog()} on the engine, and the palette becomes a fetch.
  *
  * <p>⚠️ <strong>This package is not under {@code service.wiki}, on purpose.</strong> TSSR-19 moves pages
- * out to WiQ and leaves the resolvers here, because "what is TSSR-4 doing right now" is a question only
+ * out to WiQi and leaves the resolvers here, because "what is TSSR-4 doing right now" is a question only
  * this product can answer. When that happens the engine's caller changes from a local controller to a
  * remote one and nothing in this package moves.
  */

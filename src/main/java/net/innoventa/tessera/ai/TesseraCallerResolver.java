@@ -1,7 +1,7 @@
 package net.innoventa.tessera.ai;
 
 import lombok.RequiredArgsConstructor;
-import net.innoventa.tessera.ai.authorization.McpCredentialService;
+import org.jmouse.ai.mcp.authorization.server.AgentCredentials;
 import net.innoventa.tessera.domain.Member;
 import net.innoventa.tessera.service.MemberService;
 import org.jmouse.ai.CallerAttributes;
@@ -52,19 +52,19 @@ import java.util.Map;
 public class TesseraCallerResolver implements CallerResolver {
 
     private final MemberService         memberService;
-    private final McpCredentialService  credentials;
+    private final AgentCredentials  credentials;
 
     @Override
     public CallerIdentity resolve() {
         Jwt    token   = currentToken();
         Member member  = memberService.requireBySubject(token.getClaimAsString(JwtClaimNames.SUB));
-        String agentId = token.getClaimAsString(McpCredentialService.AGENT_CLAIM);
+        String agentId = token.getClaimAsString(AgentCredentials.AGENT_CLAIM);
 
         if (agentId == null || agentId.isBlank()) {
             return asPerson(member);
         }
 
-        return asAgent(member, agentId, token.getClaimAsString(McpCredentialService.CREDENTIAL_CLAIM));
+        return asAgent(member, agentId, token.getClaimAsString(AgentCredentials.CREDENTIAL_CLAIM));
     }
 
     /** A person at the assistant: one identity, and nothing below had to learn about it. */

@@ -18,6 +18,7 @@ import net.innoventa.tessera.repository.ProjectRepository;
 import net.innoventa.tessera.security.Permissions;
 import net.innoventa.tessera.security.access.Targets;
 import net.innoventa.tessera.security.access.TesseraScope;
+import org.jmouse.access.PermissionCatalog;
 import org.jmouse.access.ScopeCatalog;
 import org.jmouse.access.ScopeKind;
 import org.jmouse.access.ScopeReference;
@@ -73,6 +74,14 @@ public class AccessAdministrationService {
     private final PolicyDocument       document;
     private final MemberRepository     members;
     private final ProjectRepository    projects;
+
+    /**
+     * ⚠️ The vocabulary as the policy documents declare it — BOTH axes at once.
+     *
+     * <p>`tessera.jmp` says what a subject may do and `tools.jmp` says which actions may be reached
+     * through a tool; the loader merges them, so this screen offers and validates against one list.
+     */
+    private final PermissionCatalog    vocabulary;
 
     /**
      * Everything the screen shows, in one request.
@@ -228,10 +237,18 @@ public class AccessAdministrationService {
                 .orElseThrow(() -> new ResourceNotFoundException("Role not found: " + roleName));
     }
 
+    /**
+     * ⚠️ Asked of the CATALOGUE rather than of {@link Permissions}, and the difference is a whole axis.
+     *
+     * <p>The catalogue is read off the policy documents, so it holds both what a subject may <em>do</em>
+     * (`tessera.jmp`) and which actions may be reached <em>through a tool</em> (`tools.jmp`). Checking
+     * against the Java constants instead refused every `tool:` grant as "a permission this build knows
+     * nothing about" — while it sat, declared, in a file the engine reads.
+     */
     private void requireKnownPermission(String permission) {
-        if (!Permissions.all().contains(permission)) {
+        if (!vocabulary.all().contains(permission)) {
             throw new BusinessRuleViolationException(
-                    "'" + permission + "' is not a permission this build knows about, so granting it "
+                    "'" + permission + "' is not a permission this installation declares, so granting it "
                     + "would confer nothing and denying it would refuse nothing.");
         }
     }
@@ -245,8 +262,13 @@ public class AccessAdministrationService {
                         declaration -> declaration.description() == null ? "" : declaration.description(),
                         (first, second) -> first));
 
-        return Permissions.all().stream()
+        // ⚠️ The catalogue, so the screen offers BOTH axes: what a subject may do, and which actions
+        // may be reached through a tool. Reading `Permissions.all()` here left every `tool:` switch off
+        // the screen while the engine resolved it perfectly well — so an agent could not be given a
+        // tool from the one screen that administers people.
+        return vocabulary.all().stream()
                 .map(name -> new PermissionView(name, described.get(name)))
+                .sorted(java.util.Comparator.comparing(PermissionView::name))
                 .toList();
     }
 
@@ -300,7 +322,7 @@ public class AccessAdministrationService {
      * instead.
      */
     private void requireItCanMatchSomething(BundleEntryView entry) {
-        if (!Permissions.all().contains(entry.permission())) {
+        if (!vocabulary.all().contains(entry.permission())) {
             throw new BusinessRuleViolationException(
                     "'" + entry.permission() + "' is not a permission this build knows about, so a role "
                     + "carrying it would confer nothing.");

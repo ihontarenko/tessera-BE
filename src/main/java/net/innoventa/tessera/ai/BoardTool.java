@@ -6,7 +6,6 @@ import net.innoventa.tessera.service.ProjectService;
 import net.innoventa.tessera.dto.board.BoardCardView;
 import net.innoventa.tessera.dto.board.BoardColumnView;
 import net.innoventa.tessera.dto.board.BoardResponse;
-import net.innoventa.tessera.security.Permissions;
 import net.innoventa.tessera.service.BoardService;
 import org.jmouse.ai.ArgumentSchema;
 import org.jmouse.ai.ToolAction;
@@ -70,7 +69,6 @@ public class BoardTool implements ToolDefinition {
                            + "exactly one board, so this is really the answer to 'which of my projects "
                            + "plan in sprints'.")
                 .inputSchema(ArgumentSchema.none())
-                .requiredPermission(Permissions.BROWSE_PROJECT)
                 .readOnly()
                 .handler(this::handleList)
                 .build();
@@ -107,7 +105,6 @@ public class BoardTool implements ToolDefinition {
                         .optionalString("filter",
                                 "A board filter expression to mark matching cards, e.g. "
                               + "issue.assignee == currentMember. Omit to see everything unmarked."))
-                .requiredPermission(Permissions.BROWSE_PROJECT)
                 .readOnly()
                 .scopeConfined()
                 .handler(this::handleRead)

@@ -359,9 +359,21 @@ public class BoardService {
 
     /**
      * Ancestor lookup for the epic walk: the already-loaded slice first, the repository only for a
-     * parent outside it. A full-board render loads the whole project and a parent is always in the same
-     * project ({@link IssueHierarchyService#validateParent}), so the hot path never falls through —
-     * while the single-card render after a move, which loads one issue, still resolves correctly.
+     * parent outside it. A full-board render loads the whole project, so the hot path rarely falls
+     * through — while the single-card render after a move, which loads one issue, still resolves
+     * correctly.
+     *
+     * <p>⚠️ <strong>"A parent is always in the same project" was this comment's reasoning and is no
+     * longer true</strong> (TSSR-56): a type at {@code PROJECT_SPANNING_LEVEL} may hold work across
+     * projects. Nothing here changes, and that is worth stating rather than assuming —
+     * <ul>
+     *   <li>the board's cards come from {@code findByProjectId…}, so a Story with a foreign parent stays
+     *       on its own board and a foreign parent never becomes a card;
+     *   <li>{@code EpicResolver} stops at level 1, and level 1 still cannot cross, so the walk never
+     *       leaves the project;
+     *   <li>and it returns a <em>key</em>, which is the half of a reference that travels anyway.
+     * </ul>
+     * The fallthrough below is what keeps that true if any of the three ever stops being.
      */
     private Function<String, Issue> ancestorLookup(List<Issue> issues) {
         Map<String, Issue> loaded = issues.stream().collect(Collectors.toMap(Issue::getId, Function.identity()));

@@ -55,7 +55,6 @@ public class IssueActivityService {
             .map(event -> new ActivityLogResponse(
                 event.getId(),
                 memberRepository.findById(event.getActorMemberId()).map(MemberSummary::from).orElse(null),
-                event.getAgentName(),
                 event.getCreatedAt(),
                 itemsByEvent.getOrDefault(event.getId(), List.of()).stream()
                     .map(item -> new ActivityLogItemResponse(item.getField(), item.getOldValue(), item.getNewValue()))

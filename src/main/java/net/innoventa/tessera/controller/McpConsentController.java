@@ -2,8 +2,8 @@ package net.innoventa.tessera.controller;
 
 import lombok.RequiredArgsConstructor;
 import net.innoventa.tessera.ai.McpEndpoint;
-import net.innoventa.tessera.ai.authorization.McpAuthorizationSettings;
-import net.innoventa.tessera.ai.authorization.McpCredentialService;
+import org.jmouse.ai.mcp.authorization.server.McpAuthorizationProperties;
+import org.jmouse.ai.mcp.authorization.server.AgentCredentials;
 import net.innoventa.tessera.dto.agent.ConnectionInfoResponse;
 import net.innoventa.tessera.dto.agent.ConnectionResponse;
 import net.innoventa.tessera.service.MemberService;
@@ -48,8 +48,8 @@ public class McpConsentController {
      */
     static final String BASE = "/api/agents/authorization";
 
-    private final McpCredentialService     credentialService;
-    private final McpAuthorizationSettings settings;
+    private final AgentCredentials     credentialService;
+    private final McpAuthorizationProperties settings;
     private final MemberService            memberService;
 
     /** Where to point a client — the address this installation actually serves the protocol on. */

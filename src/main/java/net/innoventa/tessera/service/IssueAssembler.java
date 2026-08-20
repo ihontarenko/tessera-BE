@@ -124,12 +124,21 @@ public class IssueAssembler {
             .sorted(String.CASE_INSENSITIVE_ORDER)
             .toList();
 
+        // ⚠️ Hierarchy is redacted like a link now (TSSR-56) — see `visibleReferenceOf`. The same
+        // `browsableProjects` component, and the same trap it exists to avoid: never
+        // `projectAccess.visibleProjectIds` directly.
+        Set<String> visibleProjectIds = Set.copyOf(browsableProjects.idsFor(caller));
+
         IssueReference parent = issue.getParentId() == null
             ? null
-            : issueRepository.findById(issue.getParentId()).map(this::referenceOf).orElse(null);
+            : issueRepository.findById(issue.getParentId())
+                .map(found -> visibleReferenceOf(found, visibleProjectIds))
+                .orElse(null);
 
+        // ⚠️ A child in a project the reader cannot browse is redacted, never dropped. A Hub whose list
+        // silently loses four of its twenty members is a list that lies with nothing to say it did.
         List<IssueReference> children = issueRepository.findByParentIdOrderByRankAsc(issue.getId()).stream()
-            .map(this::referenceOf)
+            .map(child -> visibleReferenceOf(child, visibleProjectIds))
             .toList();
 
         return new IssueResponse(
@@ -259,12 +268,13 @@ public class IssueAssembler {
     }
 
     /**
-     * The far side of a link, as much of it as this caller may see (TSSR-43).
+     * A reference, as much of it as this caller may see (TSSR-43).
      *
-     * <p>⚠️ <strong>Only links are redacted, never parents or children.</strong> A parent must be in the
-     * same project as its child ({@code IssueHierarchyService.validateParent}), so hierarchy can never
-     * reach outside what the reader can already browse — running it through this would be a check that
-     * always passes, pretending to be a rule.
+     * <p>⚠️ <strong>It used to be links only, and that stopped being right</strong> (TSSR-56). The
+     * argument was that a parent must be in the same project as its child, so hierarchy could never
+     * reach outside what the reader can already browse — true until a Hub at level 2 was allowed to span
+     * projects. Parents and children now go through it too, and the check that "always passes" for
+     * ordinary hierarchy is exactly what makes it correct for the one case that does not.
      */
     private IssueReference visibleReferenceOf(Issue issue, Set<String> visibleProjectIds) {
         IssueReference full = referenceOf(issue);

@@ -1,7 +1,7 @@
 package net.innoventa.tessera.controller;
 
 import lombok.RequiredArgsConstructor;
-import net.innoventa.tessera.ai.authorization.McpAuthorizationSettings;
+import org.jmouse.ai.mcp.authorization.server.McpAuthorizationProperties;
 import org.jmouse.access.enforcement.PublicEndpoint;
 import org.jmouse.ai.mcp.authorization.AuthorizationDocuments;
 import org.jmouse.ai.mcp.authorization.AuthorizationRoutes;
@@ -32,7 +32,7 @@ import java.util.Map;
  * <p>⚠️ <strong>The authorization-server document is Tessera's own.</strong> It used to be Identity that a
  * client was sent to, and Identity does not support dynamic client registration — so a client discovered
  * the resource, read the issuer, fetched its metadata, found no {@code registration_endpoint} and gave up
- * before anything it could act on. See {@code McpCredentialService} for what changed and why a protocol
+ * before anything it could act on. See {@code AgentCredentials} for what changed and why a protocol
  * credential is signed here.
  *
  * <p>The three addresses it advertises are resolved from the shared route descriptor rather than written
@@ -44,7 +44,7 @@ import java.util.Map;
 @PublicEndpoint("Discovery is read before a client holds anything — that is what it is for — and it discloses only routes that were already reachable.")
 public class McpDiscoveryController {
 
-    private final McpAuthorizationSettings   settings;
+    private final McpAuthorizationProperties   settings;
     private final McpAuthorizationProperties authorization;
 
     /** Where a client authorizes, redeems a code, and renews a credential (RFC 8414). */
@@ -56,7 +56,7 @@ public class McpDiscoveryController {
         AuthorizationRoutes routes = authorization.routes();
 
         return AuthorizationDocuments.authorizationServer(
-                settings.resourceUrl(),
+                settings.getResourceUrl(),
                 settings.apiUrl(routes.authorization()),
                 settings.apiUrl(routes.token()),
                 settings.apiUrl(routes.registration()),

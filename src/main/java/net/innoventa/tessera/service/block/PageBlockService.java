@@ -28,7 +28,7 @@ import java.util.stream.Collectors;
  * with the concept that owns its meaning.
  *
  * <p>⚠️ <strong>And it does not know what a page is either.</strong> The caller hands it markdown, not a
- * page identifier. That is what keeps this engine out of the wiki's way when TSSR-19 moves pages to WiQ:
+ * page identifier. That is what keeps this engine out of the wiki's way when TSSR-19 moves pages to WiQi:
  * the caller changes from a controller down the hall to one across the network, and nothing here moves.
  *
  * <h2>⚠️ The document is the allowlist</h2>
@@ -65,6 +65,46 @@ public class PageBlockService {
             request == null || request.directives() == null ? List.of() : request.directives();
 
         return directives.stream().map(directive -> resolveOne(caller, markdown, directive)).toList();
+    }
+
+    /**
+     * Answer every directive in a document this product does <strong>not</strong> store (TSSR-19).
+     *
+     * <p>⚠️ <strong>No {@code DirectiveMatcher} gate, and that is decided rather than forgotten.</strong>
+     * The gate compares a directive against the page's stored markdown; once pages live in Kiwi there is
+     * no stored markdown here to compare with, and asking Kiwi for the page first would be exactly the
+     * backend-to-backend call KW-1 §1 refuses.
+     *
+     * <p>What makes dropping it safe is KW-1's fourth finding: <strong>the matcher buys nothing for an
+     * authenticated reader.</strong> Every resolver authorises the caller itself — a directive naming an
+     * issue in a project they cannot browse comes back {@code NOT_FOUND} from the resolver, not from the
+     * gate — so this route tells that person nothing this product's own API would refuse them.
+     *
+     * <p>⚠️ <strong>It is not safe for an anonymous one</strong>, where the caller's choice is the only
+     * input there is. That path keeps the gate; see {@link DirectiveMatcher} and INVT-0092.
+     */
+    public List<PageBlockView> resolveUnbound(Member caller, ResolveBlocksRequest request) {
+        List<ResolveBlocksRequest.Directive> directives =
+            request == null || request.directives() == null ? List.of() : request.directives();
+
+        return directives.stream().map(directive -> resolveOneUnbound(caller, directive)).toList();
+    }
+
+    private PageBlockView resolveOneUnbound(Member caller, ResolveBlocksRequest.Directive directive) {
+        String name = DirectiveMatcher.normaliseName(directive.name());
+        String argument = directive.argument() == null ? "" : directive.argument().trim();
+
+        if (argument.isEmpty()) {
+            return PageBlockView.miss(name, argument, BlockStatus.NOT_FOUND);
+        }
+
+        PageBlockResolver resolver = resolversByDirective.get(name);
+
+        if (resolver == null) {
+            return PageBlockView.miss(name, argument, BlockStatus.UNKNOWN_DIRECTIVE);
+        }
+
+        return resolver.resolve(new BlockRequest(argument, caller));
     }
 
     private PageBlockView resolveOne(Member caller, String markdown, ResolveBlocksRequest.Directive directive) {

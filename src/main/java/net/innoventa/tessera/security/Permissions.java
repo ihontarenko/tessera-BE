@@ -135,6 +135,21 @@ public final class Permissions {
     public static final String ADMINISTER_CONFIGURATION = "configuration:administer";
 
     /**
+     * Administering the installation's people and clients — their names and their faces (TSSR-79).
+     *
+     * <p>⚠️ <strong>Its own, because {@link #ADMINISTER_CONFIGURATION} says so.</strong> That one is
+     * named for the catalogs and its javadoc states that an installation-wide concern which is not the
+     * configuration — <em>accounts, licensing, quotas</em> — should have to ask for a grant of its own
+     * rather than inherit it. This is the first of those to arrive.
+     *
+     * <p>⚠️ <strong>It does not gate the member directory.</strong> {@code GET /api/members} stays open
+     * to every signed-in caller: it is the picker somebody adds a colleague to a project from, and
+     * gating it would mean only administrators could name a person. This gates the screen that
+     * <em>administers</em> those rows.
+     */
+    public static final String ADMINISTER_MEMBERS = "member:administer";
+
+    /**
      * See what the tools have been asked to do, and what is in force behind the assistant.
      *
      * <p>⚠️ <strong>A disclosure surface rather than a convenience.</strong> It reports every caller's

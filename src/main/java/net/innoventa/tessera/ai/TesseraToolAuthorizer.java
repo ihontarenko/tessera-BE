@@ -1,9 +1,8 @@
 package net.innoventa.tessera.ai;
 
 import lombok.RequiredArgsConstructor;
-import net.innoventa.tessera.security.Permissions;
 import net.innoventa.tessera.security.access.ProjectAccess;
-import org.jmouse.access.Subject;
+import org.jmouse.ai.CallerAttributes;
 import org.jmouse.ai.CallerIdentity;
 import org.jmouse.ai.InvocationScope;
 import org.jmouse.ai.ToolAction;
@@ -12,54 +11,51 @@ import org.jmouse.ai.spi.ToolAuthorizer;
 import org.springframework.stereotype.Component;
 
 /**
- * What an action costs, asked of the authorization model Tessera has.
+ * Whether this caller has been given this tool.
  *
- * <p><strong>This is the case {@code ToolAuthorizer} exists as a seam for</strong>, and the answer has
- * moved underneath it twice without the seam noticing. It used to read Tessera's own tables; it then read
- * the engine, over the same grants every route resolves from; and it now reads the engine about the right
- * <em>subject</em>, which is the part that was wrong.
+ * <h2>One tool, one permission, and the tool knows nothing else</h2>
  *
- * <h2>⚠️ What was wrong, and what it cost</h2>
+ * <p>Every action declares {@code tool:<published name>} and that is the whole of what reaching it
+ * costs — {@code IssueTool.create()} asks for {@code tool:issues_create}, not for {@code issue:create}.
+ * So administering an agent is <strong>ticking tools</strong>: open it, switch on all of them or a few,
+ * and there is nothing else to fill in.
  *
- * <p>It resolved {@code caller.callerId()} into a member and asked about that member — throwing away
- * {@code actsOnBehalfOf} entirely. For a person at the assistant the two are equal and nothing showed.
- * For an agent restricted to less than its owner holds, the ceiling would have been silently ignored:
- * somebody narrows an agent, the screen says restricted, and every tool call resolves the owner's full
- * set anyway. A restriction with no effect is worse than no restriction, because somebody is relying on
- * it.
+ * <h2>⚠️ One subject is asked, and which one is the authority's answer</h2>
  *
- * <p>{@link CallerSubjects} is the shared translation the access bridge already uses, so the two cannot
- * disagree. A caller acting for itself becomes an ordinary subject; one acting for somebody becomes the
- * engine's service sub-account, capped in every scope.
+ * <p>There is no second reading here and no special case: the question goes to
+ * {@link CallerSubjects#of}, the same translation every other caller of the access engine uses. What
+ * differs is who that turns out to be, and {@code AgentCallers} decided it before this ran.
  *
- * <h2>Asked twice, and the two questions differ</h2>
+ * <table border="1">
+ *   <caption>What each authority means</caption>
+ *   <tr><th>Authority</th><th>Asked</th><th>Consequence</th></tr>
+ *   <tr><td>{@code INHERITED}</td><td>the owner</td>
+ *       <td>everything the owner holds, including their tool switches. ⚠️ An owner with no
+ *           {@code tool:} permission gives the agent none — the agent is <em>being</em> them, so there
+ *           is nothing of its own to consult</td></tr>
+ *   <tr><td>{@code RESTRICTED}</td><td>the agent</td>
+ *       <td>its own roles and permissions, <strong>not capped by the owner</strong>. A set the owner
+ *           does not hold is a set the agent may still have</td></tr>
+ * </table>
  *
- * <ul>
- *   <li>{@link #permits} runs before any project is resolved and asks whether the caller holds the
- *       permission <em>in any project at all</em>. A caller holding it nowhere is refused without
- *       learning which projects exist, which is the entire reason the dispatcher checks permission
- *       before scope.
- *   <li>{@link #permitsInScope} runs at the project the call resolved to. This is where Tessera's model
- *       actually lives: a person may transition issues in one project and not in the next, and a DENY
- *       override on them personally beats the role that grants it.
- * </ul>
+ * <p>⚠️ <strong>So the two are different accounts rather than two points on one scale.</strong>
+ * {@code INHERITED} is <em>be this person</em>; {@code RESTRICTED} is <em>be yourself</em>. A restricted
+ * agent granted nothing is not a slightly narrowed owner — it holds nothing at all, sees no project, and
+ * every call is refused. Filling it in is the point of restricting it.
  *
- * <h2>⚠️ The first question is about breadth, not about places</h2>
+ * <h2>⚠️ Data is not this file's question, and never was</h2>
  *
- * <p>{@link #permits} used to iterate every project the caller could reach and ask about each. That
- * costs a query per project, and — worse — it answered a narrower question than it appeared to: a
- * caller holding the permission <em>installation-wide</em> reaches no project by name, because a
- * visibility scope says {@code EVERYTHING} rather than listing them. The stream was then empty and
- * every action was refused, naming a permission the caller genuinely held. It now asks
- * {@code ProjectAccess.holdsAnywhere}, which reads the breadth in one query — the same
- * {@code seesNothing()} shape {@code AccessToolAuthorizer} in {@code jmouse-ai-access} uses, adopted
- * here without waiting for the {@code ScopeCatalog} this product has still not published.
+ * <p>A tool permission says which action may be reached. <em>Which rows</em> is decided downstream by
+ * the same subject — {@code ProjectScopeResolver} and every listing filter on its {@code project:browse}
+ * — so a restricted agent also needs whatever ordinary permissions it is meant to work with, and an
+ * inherited one has the owner's by construction.
  *
- * <p>⚠️ <strong>A scope-free yes is not a yes.</strong> It only says the caller is not a stranger to
- * this permission; {@link #permitsInScope} is what decides the project the call actually names, and a
- * DENY override there still wins. An action that is not scope-confined — {@code projects_create}, which
- * has no project to be confined to — is gated by this question alone, so the permission it declares has
- * to be one that means something installation-wide.
+ * <h2>⚠️ Not scope-confined, and that is the design rather than an omission</h2>
+ *
+ * <p>The tool switches are global: <em>which</em> tools is this axis's answer, <em>where</em> they may
+ * be pointed is the subject's ordinary project access. Confining the tool axis per project as well would
+ * be a second place to say the same thing, and the two would disagree the first time somebody edited
+ * one.
  */
 @Component
 @RequiredArgsConstructor
@@ -69,57 +65,45 @@ public class TesseraToolAuthorizer implements ToolAuthorizer {
 
     @Override
     public boolean permits(CallerIdentity caller, ToolAction action) {
-        // Anywhere at all — installation-wide, at some project, or over the caller's own rows. Asking
-        // for the places instead would miss the first of those; see ProjectAccess.holdsAnywhere.
-        return projectAccess.holdsAnywhere(
-                CallerSubjects.of(caller), action.requiredPermission());
-    }
-
-    @Override
-    public boolean permitsInScope(CallerIdentity caller, ToolAction action, InvocationScope scope) {
-        return projectAccess.holds(
-                CallerSubjects.of(caller), scope.id(), action.requiredPermission());
+        return hasBeenGivenTheTool(caller, action);
     }
 
     /**
-     * Why the permission is missing, for the one cause that reads as a broken installation and is not.
+     * The same question, and deliberately the same answer.
      *
-     * <p>⚠️ <strong>On a freshly created database every tool refuses at once, and the refusal names a
-     * permission.</strong> That sentence sent whoever read it — a person, or a model reporting to
-     * one — to debug the token, the agent's authority flag and the caller resolver, all of which were
-     * correct. The cause is structural: {@code MemberProvisioner} makes the first member a global access
-     * administrator, and {@code policy/tessera.jmp} deliberately gives that role no project permission at
-     * all, because every one of them is carried by the three {@code @PROJECT} roles and those are handed
-     * out by {@code ProjectService.create}. Belonging to no project is therefore holding nothing, and no
-     * amount of granting fixes it — only a project does.
+     * <p>The scope has already been resolved against the caller's own visible projects by the time this
+     * runs — a project it cannot browse never became a scope at all — so asking the tool switch again
+     * per project would add a condition that is either always true or a second, weaker copy of the
+     * project access that has already been checked.
+     */
+    @Override
+    public boolean permitsInScope(CallerIdentity caller, ToolAction action, InvocationScope scope) {
+        return hasBeenGivenTheTool(caller, action);
+    }
+
+    private boolean hasBeenGivenTheTool(CallerIdentity caller, ToolAction action) {
+        return projectAccess.holdsAnywhere(CallerSubjects.of(caller), action.requiredPermission());
+    }
+
+    /**
+     * Why the tool is out of reach — for the one cause that reads as a broken installation and is not.
      *
-     * <p>Two cases are deliberately left to the plain refusal, because for them this diagnosis would be
-     * false:
-     *
-     * <ul>
-     *   <li>{@link Permissions#CREATE_PROJECT} — the way out of the state cannot also be the thing the
-     *       state is blocking, and this one is installation-wide precisely so that it never is. A caller
-     *       refused <em>here</em> has a genuinely misconfigured role.
-     *   <li>Anybody who browses a project somewhere. They belong to something, so their missing
-     *       permission is an ordinary missing permission and pointing them at project creation would be
-     *       nonsense. This also covers every scope-confined refusal for free — reaching a project by
-     *       name means browsing it.
-     * </ul>
+     * <p>⚠️ <strong>A refusal here is never about a project.</strong> Before one permission per tool this
+     * method explained that a caller belonging to no project holds no project permission — true then,
+     * and actively misleading now: a refused caller may be pointed at every project in the installation
+     * and simply not have this tool switched on. Sending somebody to fix their membership when the
+     * answer is one checkbox is the expensive kind of wrong.
      */
     @Override
     public String refusalAdvice(CallerIdentity caller, ToolAction action, InvocationScope scope) {
-        if (Permissions.CREATE_PROJECT.equals(action.requiredPermission())) {
-            return null;
+        if (caller.attributes().get(CallerAttributes.AGENT_ID) == null) {
+            return "This account has not been given this tool. Tool permissions are one switch per "
+                 + "action, so nothing about projects or membership is involved here.";
         }
 
-        if (projectAccess.holdsAnywhere(CallerSubjects.of(caller), Permissions.BROWSE_PROJECT)) {
-            return null;
-        }
-
-        return "This caller belongs to no project, and in Tessera every project permission is carried by "
-               + "belonging to one — so nothing was granted wrongly, there is simply nowhere the grant "
-               + "could have come from. Create the first project with 'projects_create', which needs no "
-               + "project to exist, or ask somebody who administers an existing one to add this caller "
-               + "to it.";
+        return "This agent has not been given this tool. Every tool is its own switch, and "
+             + "MCP_AGENT_TOOLS turns the ordinary set on at once. ⚠️ Which switches are read depends on "
+             + "the agent's authority: an agent following its owner is asked about THE OWNER'S "
+             + "permissions, so switch them on there; a restricted agent is asked about its own.";
     }
 }

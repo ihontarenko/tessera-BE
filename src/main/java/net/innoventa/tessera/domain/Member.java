@@ -2,6 +2,8 @@ package net.innoventa.tessera.domain;
 
 import jakarta.persistence.*;
 import lombok.*;
+import org.jmouse.avatar.AvatarChoice;
+import org.jmouse.avatar.AvatarOwner;
 import org.jmouse.storage.jpa.StoredFile;
 
 import java.time.LocalDateTime;
@@ -24,7 +26,7 @@ import java.time.LocalDateTime;
 @AllArgsConstructor
 @Builder
 @EqualsAndHashCode(of = "id")
-public class Member {
+public class Member implements AvatarOwner {
 
     @Id
     @Column(length = 36, nullable = false)
@@ -55,7 +57,7 @@ public class Member {
     @Enumerated(EnumType.STRING)
     @Column(name = "avatar_kind", nullable = false, length = 16)
     @Builder.Default
-    private AvatarKind avatarKind = AvatarKind.INITIALS;
+    private AvatarChoice avatarKind = AvatarChoice.INITIALS;
 
     /** The seed a generated pixel face is drawn from, when {@link #avatarKind} is {@code PRESET}. */
     @Column(name = "avatar_preset", length = 64)
@@ -76,6 +78,39 @@ public class Member {
     @JoinColumn(name = "avatar_file_id")
     private StoredFile avatarFile;
 
+    /**
+     * Whether this row is a person or a client's standing identity (TSSR-32).
+     *
+     * <p>⚠️ <strong>Every listing that means people filters on this.</strong> An agent is a member so
+     * that authorship is one reference with one face; it is not a member in the sense a picker means.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(nullable = false, length = 16)
+    @Builder.Default
+    private MemberKind kind = MemberKind.PERSON;
+
+    /**
+     * Whose agent this is — the owner's member id, and null on a person.
+     *
+     * <p>⚠️ <strong>Record-keeping, and nothing that decides whether a call is allowed may read it.</strong>
+     * It <em>looks</em> like an inheritance edge, which is exactly the trap: a permission resolved
+     * through it would be a second permission model beside {@code jmouse-access}'s, agreeing with it
+     * until the afternoon somebody changed one. Ownership for authorization is the library's
+     * {@code Agent.ownerReference()}. See the ADR — WiQi got this wrong twice before it was written down.
+     */
+    @Column(name = "parent_id", length = 36)
+    private String parentId;
+
+    /**
+     * When the agent behind this row was switched off, or null while it is live.
+     *
+     * <p>⚠️ <strong>The non-negotiable of the whole epic.</strong> A comment points at its agent, so
+     * deleting this row loses the author of every comment that agent ever wrote — silently, at the
+     * moment somebody tidies up their connections. Discard retires; it never deletes.
+     */
+    @Column(name = "retired_at")
+    private LocalDateTime retiredAt;
+
     @Column(name = "created_at", nullable = false, updatable = false)
     private LocalDateTime createdAt;
 
@@ -84,14 +119,14 @@ public class Member {
 
     /** Drop back to drawn initials, forgetting whichever face was chosen before. */
     public void wearsInitials() {
-        avatarKind   = AvatarKind.INITIALS;
+        avatarKind   = AvatarChoice.INITIALS;
         avatarPreset = null;
         avatarFile   = null;
     }
 
     /** Wear a generated pixel face, drawn from {@code seed}. */
     public void wearsPreset(String seed) {
-        avatarKind   = AvatarKind.PRESET;
+        avatarKind   = AvatarChoice.PRESET;
         avatarPreset = seed;
         avatarFile   = null;
     }
@@ -104,9 +139,58 @@ public class Member {
      * asking who still points at them, never by whoever stopped.
      */
     public void wearsPicture(StoredFile picture) {
-        avatarKind   = AvatarKind.UPLOAD;
+        avatarKind   = AvatarChoice.UPLOAD;
         avatarPreset = null;
         avatarFile   = picture;
+    }
+
+    // ── AvatarOwner ───────────────────────────────────────────────────────────
+    //
+    // What jmouse-avatars needs to see. The three writers above already had exactly the right shape —
+    // one value in three columns, only ever set together — so adopting the library cost this seam and
+    // nothing else. ⚠️ The module persists nothing: it mutates this row and the caller saves it, which
+    // is why the invariant the database states stays the invariant this class states.
+
+    @Override
+    public String avatarOwnerId() {
+        return id;
+    }
+
+    @Override
+    public AvatarChoice avatarChoice() {
+        return avatarKind;
+    }
+
+    @Override
+    public String avatarSeed() {
+        return avatarPreset;
+    }
+
+    @Override
+    public StoredFile avatarFile() {
+        return avatarFile;
+    }
+
+    /** Whether this row is a client's identity rather than a person's. */
+    public boolean isAgent() {
+        return kind == MemberKind.AGENT;
+    }
+
+    /** Whether the agent behind it has been switched off. Always false for a person. */
+    public boolean isRetired() {
+        return retiredAt != null;
+    }
+
+    /**
+     * Switch the agent off without losing what it wrote.
+     *
+     * <p>⚠️ Idempotent, and it has to be: {@code discard} is reachable from a screen, from the protocol
+     * and from removing a person, and the second caller must not move the date somebody is reading.
+     */
+    public void retire() {
+        if (retiredAt == null) {
+            retiredAt = LocalDateTime.now();
+        }
     }
 
     @PrePersist

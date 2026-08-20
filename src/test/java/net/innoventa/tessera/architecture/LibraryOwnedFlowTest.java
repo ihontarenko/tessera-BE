@@ -9,7 +9,6 @@ import com.tngtech.archunit.lang.ArchRule;
 import com.tngtech.archunit.lang.ConditionEvents;
 import com.tngtech.archunit.lang.SimpleConditionEvent;
 import org.jmouse.ai.mcp.authorization.server.ApprovingSubject;
-import org.jmouse.ai.mcp.authorization.server.CredentialIssuer;
 
 import java.util.List;
 
@@ -28,7 +27,7 @@ import static com.tngtech.archunit.lang.syntax.ArchRuleDefinition.noClasses;
  * in comparison with something nobody is looking at.
  *
  * <p>The other half is the positive one, and it guards a silent failure: the shared endpoints are
- * auto-configured <em>only</em> where a {@link CredentialIssuer} bean exists. Delete that class and
+ * auto-configured <em>only</em> where a {@code ProtocolTokenMinter} bean exists. Delete that class and
  * nothing fails to compile — three routes simply stop being mapped, and the first thing that notices is
  * a client that cannot connect.
  *
@@ -61,21 +60,19 @@ public class LibraryOwnedFlowTest {
                             of something, widen it — the library is in this workspace and takes \
                             changes.""");
 
-    /**
-     * ⚠️ Both halves of the seam, because either one missing unmaps the endpoints without a compile
-     * error — and an installation that cannot be connected to looks identical to one nobody has tried.
+    /*
+     * ⚠️ `theSeamIsWired` IS GONE, AND THE SEAM WENT WITH IT.
+     *
+     * It asserted that whatever implements `CredentialIssuer` lives in `ai.authorization` — Tessera used
+     * to mint its own protocol credential, signed with a secret only it held. That moved into the
+     * library: `McpCredentialService` and `TesseraCredentialIssuer` are deleted, and nothing in this
+     * product implements the interface any more.
+     *
+     * So the rule matched NO classes and ArchUnit failed it on `failOnEmptyShould` — the whole test class
+     * red, over a rule that had simply stopped looking. ⚠️ The tempting fix is `allowEmptyShould(true)`,
+     * which turns it into a rule that guards nothing and never says so. Deleting it is the honest one:
+     * `whoMayApproveIsThisProductsAnswer` below is the half of this seam Tessera still owns.
      */
-    @ArchTest
-    static final ArchRule theSeamIsWired =
-            classes()
-                    .that().implement(CredentialIssuer.class)
-                    .should().resideInAPackage("net.innoventa.tessera.ai.authorization..")
-                    .because("""
-                            minting is the one thing the shared flow refuses to have an opinion \
-                            about, and Tessera's answer is unusually strong: it signs its own \
-                            protocol credential with a secret only it holds, so "this works nowhere \
-                            else" is a signature that does not verify. That belongs beside \
-                            McpCredentialService, which is what actually does it.""");
 
     @ArchTest
     static final ArchRule whoMayApproveIsThisProductsAnswer =

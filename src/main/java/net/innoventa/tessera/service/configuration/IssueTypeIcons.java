@@ -31,7 +31,10 @@ public final class IssueTypeIcons {
             // The seeded five, in hierarchy order.
             "epic", "story", "task", "bug", "sub-task",
             // Wider containers — an Initiative at level 2 was always anticipated.
-            "initiative", "milestone",
+            // ⚠️ A hub is the one of these that does not contain its members. It gathers work that
+            // lives in other projects, which parenthood cannot express today, so the glyph is spokes
+            // meeting at a centre rather than a stack — the difference is the point of the type.
+            "initiative", "milestone", "hub",
             // Kinds of work a team actually distinguishes.
             "improvement", "feature", "spike", "chore", "documentation", "design", "research",
             // Things that arrive rather than get planned.

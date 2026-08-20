@@ -1,6 +1,6 @@
 package net.innoventa.tessera.dto;
 
-import net.innoventa.tessera.domain.AvatarKind;
+import org.jmouse.avatar.AvatarChoice;
 import net.innoventa.tessera.domain.Member;
 
 /**
@@ -25,26 +25,26 @@ import net.innoventa.tessera.domain.Member;
  *               {@code PublicAvatarController}
  */
 public record MemberAvatarView(
-    AvatarKind kind,
+    AvatarChoice kind,
     String preset,
     String url
 ) {
 
     /** The face of somebody who has never chosen one. */
     public static MemberAvatarView initials() {
-        return new MemberAvatarView(AvatarKind.INITIALS, null, null);
+        return new MemberAvatarView(AvatarChoice.INITIALS, null, null);
     }
 
     public static MemberAvatarView from(Member member) {
         return switch (member.getAvatarKind()) {
             case INITIALS -> initials();
-            case PRESET -> new MemberAvatarView(AvatarKind.PRESET, member.getAvatarPreset(), null);
+            case PRESET -> new MemberAvatarView(AvatarChoice.PRESET, member.getAvatarPreset(), null);
             // ⚠️ Defensive rather than paranoid. The shape constraint makes a null file impossible for
             // this kind in the database — but a Member built in memory and not yet flushed has not met
             // that constraint, and rendering initials beats a null pointer inside a listing.
             case UPLOAD -> member.getAvatarFile() == null
                 ? initials()
-                : new MemberAvatarView(AvatarKind.UPLOAD, null,
+                : new MemberAvatarView(AvatarChoice.UPLOAD, null,
                                        PublicAvatarRoutes.of(member.getAvatarFile().getIdentifier()));
         };
     }

@@ -1,21 +1,18 @@
 package net.innoventa.tessera.config;
 
+import jakarta.persistence.EntityManagerFactory;
 import net.innoventa.tessera.ai.AssistantPrompt;
-import net.innoventa.tessera.security.Permissions;
+import net.innoventa.tessera.repository.MemberRepository;
+import net.innoventa.tessera.service.member.AgentMembers;
+import org.jmouse.ai.agent.AgentDirectory;
+import org.jmouse.ai.jpa.JpaAgentDirectory;
 import org.jmouse.ai.preferences.PreferenceDefinition;
 import org.jmouse.ai.provider.ChatModel;
 import org.jmouse.ai.provider.ProviderSettingsSource;
 import org.jmouse.ai.provider.RoutingChatModel;
-import org.jmouse.ai.spi.PermissionVocabulary;
 import org.springframework.context.annotation.Bean;
 import org.springframework.context.annotation.Configuration;
 
-import java.lang.reflect.Field;
-import java.lang.reflect.Modifier;
-import java.util.Arrays;
-import java.util.Set;
-import java.util.TreeSet;
-import java.util.stream.Collectors;
 
 /**
  * The two things about {@code jmouse-ai} that are genuinely Tessera's.
@@ -48,25 +45,15 @@ import java.util.stream.Collectors;
 @Configuration
 public class AiConfiguration {
 
-    /**
-     * Every permission this build knows, so the catalogue refuses an action naming one that does not
-     * exist.
-     *
-     * <p>Read off {@link Permissions}' constants rather than listed again — a second list beside them is
-     * one commit behind from the day it is written. Which is exactly why this cannot be a property: the
-     * whole value of it is that it is derived from the code the permissions are declared in.
-     */
-    @Bean
-    public PermissionVocabulary aiPermissionVocabulary() {
-        Set<String> declared = Arrays.stream(Permissions.class.getDeclaredFields())
-                .filter(field -> field.getType() == String.class
-                              && Modifier.isPublic(field.getModifiers())
-                              && Modifier.isStatic(field.getModifiers()))
-                .map(AiConfiguration::valueOf)
-                .collect(Collectors.toCollection(TreeSet::new));
-
-        return () -> declared;
-    }
+    // ⚠️ THERE IS NO `PermissionVocabulary` BEAN HERE, AND THAT IS THE FIX RATHER THAN AN OMISSION.
+    // `AiAccessAutoConfiguration` already contributes one as `permissions::all` over the engine's
+    // `PermissionCatalog`, behind . This file used to declare its own by
+    // reflecting over `Permissions`' constants, which SHADOWED that bridge — so the tool library and
+    // the access engine ended up with two different ideas of the vocabulary, and adding the `tool:`
+    // axis to one of them failed the boot with twenty-four permissions that "do not exist" while they
+    // sat declared in `policy/tools.jmp`. Deleting the bean is what makes the two the same list, and
+    // `AccessVocabularyConfiguration` reading that list off the policy documents is what makes it one
+    // source rather than two.
 
     /**
      * A model resolved per turn from whichever row is in force.
@@ -87,6 +74,34 @@ public class AiConfiguration {
     }
 
     /**
+     * The library's agent directory, with a <strong>member row mirroring every agent</strong> (TSSR-32).
+     *
+     * <h2>⚠️ Built here rather than annotated where it lives</h2>
+     *
+     * <p>{@code jmouse-ai-spring-boot} registers its own {@link AgentDirectory} behind
+     * {@code @ConditionalOnMissingBean}. A {@code @Primary @Component} wrapper would therefore break in
+     * two ways at once: the component is registered <em>before</em> autoconfiguration runs, so the
+     * library would see a directory already present and <strong>skip creating the one the wrapper
+     * wraps</strong>; and asking for the interface in its constructor would resolve to itself.
+     *
+     * <p>Declaring the bean here answers both. There is exactly one {@code AgentDirectory} in the
+     * context, the library's condition is satisfied by it, and the delegate is <em>constructed</em>
+     * rather than looked up — so there is nothing for Spring to resolve ambiguously. Innoventa's
+     * {@code AiToolConfiguration} carries the same explanation and is where this shape came from.
+     *
+     * <p>⚠️ <strong>Its absence would be silent.</strong> Nothing fails when the mirror stops being
+     * written; agents simply stop having faces, and the by-lines on everything they write go back to
+     * being unresolvable identifiers — noticed months later by whoever wonders who wrote something.
+     */
+    @Bean
+    public AgentDirectory agentDirectory(
+            EntityManagerFactory entityManagerFactory,
+            MemberRepository memberRepository) {
+
+        return new AgentMembers(new JpaAgentDirectory(entityManagerFactory), memberRepository);
+    }
+
+    /**
      * The assistant's prompt, declared as something an installation may rewrite.
      *
      * <p>⚠️ <strong>The shipped wording is still in {@link AssistantPrompt}</strong> — this declares it
@@ -96,15 +111,6 @@ public class AiConfiguration {
     @Bean
     public PreferenceDefinition assistantSystemPrompt() {
         return AssistantPrompt.definition();
-    }
-
-    private static String valueOf(Field field) {
-        try {
-            return (String) field.get(null);
-        } catch (IllegalAccessException unreadable) {
-            throw new IllegalStateException("Unable to read permission constant " + field.getName(),
-                    unreadable);
-        }
     }
 
 }

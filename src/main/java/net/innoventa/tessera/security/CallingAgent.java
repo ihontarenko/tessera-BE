@@ -1,7 +1,7 @@
 package net.innoventa.tessera.security;
 
 import lombok.RequiredArgsConstructor;
-import net.innoventa.tessera.ai.authorization.McpCredentialService;
+import org.jmouse.ai.mcp.authorization.server.AgentCredentials;
 import org.jmouse.ai.agent.Agent;
 import org.jmouse.ai.agent.AgentDirectory;
 import org.springframework.security.core.Authentication;
@@ -51,7 +51,7 @@ public class CallingAgent {
             return Optional.empty();
         }
 
-        return Optional.ofNullable(token.getClaimAsString(McpCredentialService.AGENT_CLAIM))
+        return Optional.ofNullable(token.getClaimAsString(AgentCredentials.AGENT_CLAIM))
                 .filter(claim -> !claim.isBlank());
     }
 }

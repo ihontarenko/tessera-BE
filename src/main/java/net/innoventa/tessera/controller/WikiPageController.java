@@ -140,7 +140,7 @@ public class WikiPageController {
      * turn the whole set into a cache key on every proxy between here and the reader. It is a batch, not
      * a mutation.
      *
-     * <p>⚠️ <strong>This method is the seam TSSR-19 cuts along.</strong> When pages move to WiQ the
+     * <p>⚠️ <strong>This method is the seam TSSR-19 cuts along.</strong> When pages move to WiQi the
      * resolvers stay here — "what is TSSR-4 doing right now" is a question only this product can answer —
      * and the caller changes from a wiki down the hall to one across the network. Everything under
      * {@code service.block} is written to survive that unchanged; this is the one place that will not.

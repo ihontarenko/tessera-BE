@@ -78,6 +78,13 @@ class BoardServiceFilterTest {
     @Mock private SprintMembershipService sprintMembershipService;
     @Mock private IssueFilterViewFactory issueFilterViewFactory;
     @Mock private BoardFilterEvaluator boardFilterEvaluator;
+    /*
+     * ⚠️ Added because BoardService grew it and this fixture did not. `@InjectMocks` fills what it has
+     * and leaves the rest NULL rather than refusing — so eight tests failed with a NullPointerException
+     * naming `blockedAmong`, which says nothing about the collaborator being absent. A missing mock is
+     * the one Mockito failure that never mentions Mockito.
+     */
+    @Mock private IssueBlockers issueBlockers;
     @Mock private Jwt jwt;
 
     @InjectMocks private BoardService boardService;

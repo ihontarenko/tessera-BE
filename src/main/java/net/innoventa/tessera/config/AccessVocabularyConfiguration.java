@@ -9,7 +9,6 @@ import org.jmouse.access.AxisCatalog;
 import org.jmouse.access.AxisKind;
 import org.jmouse.access.EffectivePermissionsResolver;
 import org.jmouse.access.EngineRefusals;
-import org.jmouse.access.PermissionCatalog;
 import org.jmouse.access.ScopeCatalog;
 import org.jmouse.access.ScopeKind;
 import org.jmouse.access.VisibilityScopeResolver;
@@ -83,17 +82,13 @@ public class AccessVocabularyConfiguration {
         return new AxisCatalog(List.<AxisKind>of(AccessAxis.values()));
     }
 
-    /**
-     * Every permission this build knows.
-     *
-     * <p>Read off {@link Permissions#all()} rather than listed again, for the reason the scope catalogue
-     * is read off the enum: a second list beside the constants is a list that is one commit behind from
-     * the day it is written.
-     */
-    @Bean
-    public PermissionCatalog permissionCatalog() {
-        return new PermissionCatalog(Permissions.all());
-    }
+    // ⚠️ THERE IS NO `PermissionCatalog` BEAN HERE EITHER, AND THAT IS DELIBERATE.
+    // `AccessPolicyAutoConfiguration` reads it off the merged policy documents — `tessera.jmp` declares
+    // what a subject may DO, `tools.jmp` declares one permission per published tool action, and
+    // `declare permissions` IS the vocabulary. A bean here would shadow that and put the list in two
+    // places again, which is exactly the failure this arrangement replaced: the same names as Java
+    // constants and as declarations, a startup check comparing them, and a boot that died naming
+    // twenty-four permissions "that do not exist" while they sat declared in a file.
 
     /**
      * The words for the two refusals the dispatcher raises itself.

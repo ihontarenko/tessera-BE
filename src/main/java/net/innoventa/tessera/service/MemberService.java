@@ -2,6 +2,8 @@ package net.innoventa.tessera.service;
 
 import lombok.RequiredArgsConstructor;
 import net.innoventa.tessera.domain.Member;
+import net.innoventa.tessera.domain.MemberKind;
+import org.jmouse.ai.agent.AgentDirectory;
 import net.innoventa.tessera.dto.CurrentMemberResponse;
 import net.innoventa.tessera.dto.MemberSummary;
 import net.innoventa.tessera.exception.ResourceNotFoundException;
@@ -32,6 +34,11 @@ public class MemberService {
     private final MemberRepository    memberRepository;
     private final MemberProvisioner   memberProvisioner;
     private final InstallationAccess  installationAccess;
+    /**
+     * ⚠️ The <strong>port</strong>, whose Tessera implementation is {@code AgentMembers} — renaming
+     * through it is what keeps the directory and the member mirror agreeing. See {@link #rename}.
+     */
+    private final AgentDirectory      agentDirectory;
 
     /**
      * Find-or-provision the local {@link Member} for a validated token. New subjects are provisioned
@@ -66,10 +73,66 @@ public class MemberService {
         return CurrentMemberResponse.from(member, globalPermissions);
     }
 
+    /**
+     * The administration list — people, clients, or both (TSSR-79).
+     *
+     * <h2>⚠️ Its own query, never a widened {@link #search}</h2>
+     *
+     * <p>{@code search} is people-only on purpose (TSSR-33) and every caller of it is a picker, an
+     * invite or a mention — a place where a client cannot be chosen. Relaxing it to serve one screen
+     * would offer an agent in a dozen places that would then refuse it.
+     *
+     * <p>The administration screen is the one place that legitimately wants both, because it is the
+     * screen that <em>administers the rows</em> rather than the one that picks somebody out of them.
+     *
+     * @param kind the kind to return, or {@code null} for every kind
+     */
+    @Transactional(readOnly = true)
+    public List<MemberSummary> administered(String query, MemberKind kind) {
+        String fragment = (query == null || query.isBlank()) ? null : query.trim();
+
+        return memberRepository.administered(kind, fragment).stream().map(MemberSummary::from).toList();
+    }
+
+    /**
+     * Renames a member — and for a client, renames the <strong>agent</strong> (TSSR-80).
+     *
+     * <h2>⚠️ An agent's name is a foreign key in disguise</h2>
+     *
+     * <p>The member row is a <em>mirror</em> of an entry in the agent directory and the direction is
+     * one-way on purpose: {@link AgentMembers#rename} renames the agent and lets the mirror follow, so a
+     * by-line says what the agent is called <em>now</em> rather than what it was. Writing
+     * {@code displayName} on the row directly leaves the two disagreeing — the exact failure that
+     * {@code agent_name}-as-a-snapshot-column was replaced to escape.
+     *
+     * <p>⚠️ <strong>An administrator may rename somebody else's client</strong>, decided 2026-08-18.
+     * Nothing here checks ownership: the route asks for {@code member:administer} installation-wide and
+     * that is the whole gate. ⚠️ It settles one verb — nothing about deleting or re-authorising
+     * somebody else's client follows from it. And ⚠️ Tessera keeps <strong>no record</strong> of the
+     * rename: `TSSR-81` proposed an audited directory here and was ruled Won't Do, which is an accepted
+     * answer rather than an oversight.
+     */
+    @Transactional
+    public MemberSummary rename(String memberId, String displayName) {
+        Member member = requireMember(memberId);
+
+        if (member.getKind() == MemberKind.AGENT) {
+            agentDirectory.rename(member.getId(), displayName);
+
+            return MemberSummary.from(requireMember(memberId));
+        }
+
+        member.setDisplayName(displayName);
+
+        return MemberSummary.from(memberRepository.save(member));
+    }
+
     @Transactional(readOnly = true)
     public List<MemberSummary> search(String query) {
+        // ⚠️ People, on both branches (TSSR-33). This is the directory a picker, an invite and a mention
+        // read; an agent is a member so that authorship has one face, not so that it can be invited.
         List<Member> members = (query == null || query.isBlank())
-            ? memberRepository.findAllByOrderByDisplayNameAsc()
+            ? memberRepository.findAllByKindOrderByDisplayNameAsc(MemberKind.PERSON)
             : memberRepository.search(query);
 
         return members.stream().map(MemberSummary::from).toList();
@@ -101,6 +164,12 @@ public class MemberService {
     @Transactional(readOnly = true)
     public Member requireBySubject(String subject) {
         return memberRepository.findBySubject(subject)
+            // ⚠️ Belt, and the braces are the schema (TSSR-32). An agent's mirror carries the synthetic
+            // subject `agent:<id>`, which Identity can never mint — so no token can reach one and this
+            // filter can never fire. It is here because "cannot happen" is a claim about a system that
+            // keeps changing, and the cost of stating it is one line, while the cost of it becoming
+            // false is a caller acting as somebody's agent.
+            .filter(member -> !member.isAgent())
             .orElseThrow(() -> new ResourceNotFoundException(
                 "No member has signed in under the subject '" + subject + "'"));
     }

@@ -25,7 +25,7 @@ import org.springframework.boot.persistence.autoconfigure.EntityScan;
  */
 @SpringBootApplication
 @EntityScan({"net.innoventa.tessera", "org.jmouse.ai.jpa.entity", "org.jmouse.access.jpa.entity",
-             "org.jmouse.storage.jpa"})
+             "org.jmouse.storage.jpa", "org.jmouse.files.jpa"})
 public class TesseraApplication {
 
     public static void main(String[] arguments) {

@@ -12,7 +12,6 @@ import net.innoventa.tessera.dto.sprint.SprintSummary;
 import net.innoventa.tessera.repository.BoardRepository;
 import net.innoventa.tessera.repository.IssueRepository;
 import net.innoventa.tessera.repository.SprintRepository;
-import net.innoventa.tessera.security.Permissions;
 import net.innoventa.tessera.service.SprintMembershipService;
 import net.innoventa.tessera.service.SprintService;
 import org.jmouse.ai.AffectedRecords;
@@ -92,7 +91,6 @@ public class SprintTool implements ToolDefinition {
                            + "none, which is an answer rather than an error.")
                 .inputSchema(ArgumentSchema.builder()
                         .scope(ProjectScopeResolver.KIND, "projects_list"))
-                .requiredPermission(Permissions.BROWSE_PROJECT)
                 .readOnly()
                 .scopeConfined()
                 .handler(this::handleList)
@@ -114,7 +112,6 @@ public class SprintTool implements ToolDefinition {
                 .inputSchema(ArgumentSchema.builder()
                         .scope(ProjectScopeResolver.KIND, "projects_list")
                         .requiredString("sprint", "The sprint's name, as sprints_list reported it."))
-                .requiredPermission(Permissions.BROWSE_PROJECT)
                 .readOnly()
                 .scopeConfined()
                 .handler(this::handleRead)
@@ -167,7 +164,6 @@ public class SprintTool implements ToolDefinition {
                               + "action takes to name this one.")
                         .optionalString("goal", "What the team means to achieve in it. Omit for none.")
                         .confirm())
-                .requiredPermission(Permissions.MANAGE_SPRINT)
                 .scopeConfined()
                 .handler(this::handleCreate)
                 .build();
@@ -228,7 +224,6 @@ public class SprintTool implements ToolDefinition {
                         .requiredString("issueKey", "The issue to commit, e.g. TES-42.")
                         .requiredString("sprint", "The sprint to move it into, by name.")
                         .confirm())
-                .requiredPermission(Permissions.MANAGE_SPRINT)
                 .scopeConfined()
                 .affectedRecords(this::selectIssue)
                 .handler(this::handleAdd)
@@ -275,7 +270,6 @@ public class SprintTool implements ToolDefinition {
                         .scope(ProjectScopeResolver.KIND, "projects_list")
                         .requiredString("issueKey", "The issue to move back to the backlog, e.g. TES-42.")
                         .confirm())
-                .requiredPermission(Permissions.MANAGE_SPRINT)
                 .scopeConfined()
                 .affectedRecords(this::selectIssue)
                 .handler(this::handleRemove)

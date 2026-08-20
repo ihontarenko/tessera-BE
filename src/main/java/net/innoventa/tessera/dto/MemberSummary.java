@@ -16,12 +16,36 @@ public record MemberSummary(
     String id,
     String displayName,
     String email,
-    MemberAvatarView avatar
+    MemberAvatarView avatar,
+    /**
+     * Whether this is a person or a client (TSSR-34, TSSR-36).
+     *
+     * <p>⚠️ <strong>This is the field that replaced `agentName` on two DTOs</strong>, and it is why the
+     * funnel was worth having. Provenance used to be a bare string carried beside the author on
+     * {@code comments} and {@code activity_logs}, rendered as a badge glued next to somebody else's
+     * chip. Now the author <em>is</em> the agent, so a client arrives with a name, a face and this — and
+     * the fourteen payloads got it without one of them changing.
+     *
+     * <p>⚠️ <strong>An offer to the interface, never a claim about authority.</strong> An agent carries
+     * none; what a client may do is what the person who approved it may do, resolved live.
+     */
+    String kind,
+    /**
+     * Whose client it is, and null on a person.
+     *
+     * <p>⚠️ <strong>Record-keeping — the interface reads it to say "SU's client", nothing else may.</strong>
+     * Resolving a permission through it would be a second permission model beside {@code jmouse-access}'s.
+     * See the ADR.
+     */
+    String parentId,
+    /** Whether the client behind it has been switched off. Everything it wrote keeps its name. */
+    boolean retired
 ) {
 
     public static MemberSummary from(Member member) {
         return new MemberSummary(member.getId(), member.getDisplayName(), member.getEmail(),
-                                 MemberAvatarView.from(member));
+                                 MemberAvatarView.from(member), member.getKind().name(),
+                                 member.getParentId(), member.isRetired());
     }
 
 }

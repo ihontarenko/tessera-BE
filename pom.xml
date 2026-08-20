@@ -199,6 +199,15 @@
             <version>${jmouse.version}</version>
         </dependency>
 
+        <!-- The tables read back out as the document that describes them: the access screen's
+             "what is actually in force" pane. ⚠️ Its own module because the three it needs must not
+             depend on each other — see jmouse-access-projection's pom. -->
+        <dependency>
+            <groupId>org.jmouse</groupId>
+            <artifactId>jmouse-access-projection</artifactId>
+            <version>${jmouse.version}</version>
+        </dependency>
+
         <!-- Bytes. Tessera stores exactly one kind of file today — a member's avatar — and stores it
              through the same library Innoventa and Moneta use rather than writing a third answer to
              "where did that upload go". What arrives is the whole mechanism: the acceptance policy,
@@ -217,6 +226,25 @@
         <dependency>
             <groupId>org.jmouse</groupId>
             <artifactId>jmouse-storage-spring-boot</artifactId>
+            <version>${jmouse.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.jmouse</groupId>
+            <artifactId>jmouse-avatars</artifactId>
+            <version>${jmouse.version}</version>
+        </dependency>
+
+        <!-- Files: the row, the polymorphic binding, and — unusually — the ENDPOINTS too.
+
+             ⚠️ Tessera is the one product that takes the library's routes rather than writing its own,
+             because it has no file routes of its own to keep: an attachment hangs off an issue and
+             needs no public byte route, no tree-wide search and no share token. Where Kiwi and
+             Innoventa each have product-specific file surfaces, this has none, so the library's is
+             exactly right. -->
+        <dependency>
+            <groupId>org.jmouse</groupId>
+            <artifactId>jmouse-storage-management</artifactId>
             <version>${jmouse.version}</version>
         </dependency>
         <dependency>
@@ -325,6 +353,18 @@
         <dependency>
             <groupId>org.jmouse</groupId>
             <artifactId>jmouse-ai-mcp-authorization</artifactId>
+            <version>${jmouse.version}</version>
+        </dependency>
+
+        <!-- POST /api/blocks/resolve — the one address a product serves so ANOTHER product's document can
+             quote its rows. ⚠️ The route, the wire contract and the dispatcher are the library's; Tessera
+             contributes resolvers and nothing else, which is the point: WiQ's pages, Innoventa's pages and
+             whatever comes next all call the same path, and nobody writes a fourth controller. ⚠️ It stays
+             inert until `jmouse.liveblocks.enabled` is true — a library must not publish an endpoint on the
+             strength of a jar being present. -->
+        <dependency>
+            <groupId>org.jmouse</groupId>
+            <artifactId>jmouse-liveblocks</artifactId>
             <version>${jmouse.version}</version>
         </dependency>
 

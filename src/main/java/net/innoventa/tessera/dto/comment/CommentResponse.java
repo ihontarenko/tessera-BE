@@ -8,15 +8,14 @@ import java.time.LocalDateTime;
  * A comment (ticket 13). {@code editable} tells the UI whether the current caller may edit/delete it
  * (their own comment, or a project administrator), so it can show or hide the controls.
  *
- * <p>{@code agentName} is the name of the agent that wrote it, where one did, and null where a person
- * did. ⚠️ It sits <em>beside</em> the author and never replaces one: the comment is still theirs, and a
  * response that swapped the person out for the tool would be answering a different question than the one
  * anybody asked.
  */
 public record CommentResponse(
     String id,
     MemberSummary author,
-    String agentName,
+    // ⚠️ `agentName` was here and is gone (TSSR-34). The author IS the agent now, so `MemberSummary`
+    // carries the name, the face and `kind` — one reference instead of a chip plus a string beside it.
     /** What it is about, where somebody said — null for an ordinary remark (TSSR-25). */
     CommentTopicSummary topic,
     /**

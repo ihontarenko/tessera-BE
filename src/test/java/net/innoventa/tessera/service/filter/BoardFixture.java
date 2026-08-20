@@ -1,5 +1,6 @@
 package net.innoventa.tessera.service.filter;
 
+import net.innoventa.tessera.domain.LinkTypeEffect;
 import net.innoventa.tessera.domain.Member;
 import net.innoventa.tessera.service.filter.IssueFilterView.EpicReference;
 import net.innoventa.tessera.service.filter.IssueFilterView.LinkReference;
@@ -59,7 +60,7 @@ final class BoardFixture {
         member("member-9", "Olena"),
         new EpicReference("TIC-42"),
         List.of(),
-        List.of(new LinkReference("Blocks", LinkReference.INWARD, "TIC-1")),
+        List.of(new LinkReference("Blocks", LinkReference.INWARD, "TIC-1", LinkTypeEffect.BLOCKS_START.name())),
         NOW.minusSeconds(days(40)), NOW.minusSeconds(days(1)), null
     );
 
@@ -89,7 +90,7 @@ final class BoardFixture {
         member("member-9", "Olena"),
         null,
         List.of(),
-        List.of(new LinkReference("Blocks", LinkReference.OUTWARD, "TIC-2")),
+        List.of(new LinkReference("Blocks", LinkReference.OUTWARD, "TIC-2", LinkTypeEffect.BLOCKS_START.name())),
         NOW.minusSeconds(days(50)), NOW.minusSeconds(days(20)), NOW.minusSeconds(days(20))
     );
 

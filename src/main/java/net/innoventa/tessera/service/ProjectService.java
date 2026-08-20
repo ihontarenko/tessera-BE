@@ -206,11 +206,11 @@ public class ProjectService {
         project.setKeyStrategy(requireKeyStrategy(request.keyStrategy()));
         project.setKeyPattern(requireKeyPattern(request.keyStrategy(), request.keyPattern()));
 
-        // ⚠️ Stored as it arrives. The category lives in WiQ's database, so this service cannot check
-        // that it exists without becoming a client of WiQ — which is the backend-to-backend call WIQ-1
-        // §1 refuses. The browser picked it from WiQ's own tree; a root that stops resolving is a state
+        // ⚠️ Stored as it arrives. The category lives in Kiwi's database, so this service cannot check
+        // that it exists without becoming a client of Kiwi — which is the backend-to-backend call KW-1
+        // §1 refuses. The browser picked it from Kiwi's own tree; a root that stops resolving is a state
         // the wiki tab handles rather than an error this method can prevent.
-        project.setWiqRootCategoryId(blankToNull(request.wiqRootCategoryId()));
+        project.setKiwiRootCategoryId(blankToNull(request.kiwiRootCategoryId()));
 
         return toResponse(project, member);
     }
@@ -319,7 +319,7 @@ public class ProjectService {
             estimationScheme,
             project.getKeyStrategy(),
             project.getKeyPattern(),
-            project.getWiqRootCategoryId(),
+            project.getKiwiRootCategoryId(),
             myPermissions,
             project.getCreatedAt(),
             project.getUpdatedAt()
