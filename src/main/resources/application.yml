@@ -298,6 +298,18 @@ jmouse:
     management:
       endpoints:
         enabled: ${TESSERA_FILE_ENDPOINTS_ENABLED:true}
+
+      # ⚠️ NOT under /api any more (JMF-51, UIK-8). `/api` is this product's space; a library that
+      # publishes controllers into it collides with whatever the product calls the same thing, which is
+      # what kept this module unmountable in two sibling products.
+      #
+      # ⚠️ Tessera did NOT hit that collision — it has no file routes of its own — so nothing here was
+      # broken. It moves anyway, because one address for one library across three products is the point;
+      # the alternative is a convention that holds everywhere except in the product that got lucky.
+      #
+      # ⚠️ THREE FILES, NOTHING CHECKS THEM: this key, the Vite proxy entry, and
+      # `UI/src/api/attachments.ts`'s client.
+      prefix: /jmouse-files/api
       # OFF, and this is a product decision rather than a precaution: an attachment here hangs off the
       # issue it was dropped onto. There are no folders to arrange, nothing to browse, and no
       # StorageDirectory this product could resolve to a project — so the tree routes would answer every
