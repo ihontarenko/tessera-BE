@@ -50,25 +50,37 @@ policy "tessera" {
         comment:write       "Comment on issues, and edit or delete your own"
         sprint:manage       "Create and manage sprints"
 
-        # ⚠️ THE WIKI'S THREE (TSSR-15, TSSR-16), AND THEY ARE THREE RATHER THAN ONE.
+        # ⚠️ THE WIKI'S THREE ARE GONE (TSSR-0099). `page:read`, `page:write` and
+        # `category:manage` described a page store this product no longer has: the
+        # pages live in Kiwi, and Kiwi decides who may read and write them, per
+        # section, through its own grants (`KW-1` §1). A permission kept here would
+        # be a second authority over the same question — and two authorities cannot
+        # guarantee that a refusal wins.
         #
-        # `page:read` is NOT `project:browse`. Everything browsing covers is the work
-        # itself; a wiki is prose beside it, and an installation that wants somebody
-        # on the board and not in the handbook has nowhere to say so while the two
-        # are one permission. Every project role below carries both, so nothing is
-        # narrowed by its existence — what it buys is the ability to take one away.
+        # ⚠️ The wiki TAB is still Tessera's, and it is gated by nothing: it draws
+        # whatever Kiwi answers, which for somebody with no grant is an empty tree.
+
+        # ⚠️ THE FILES' TWO (TSSR-0102), AND THEY REVERSE WHAT WAS WRITTEN HERE BEFORE.
         #
-        # `category:manage` is NOT `page:write`. THE TREE IS DELIBERATELY AGNOSTIC:
-        # it holds pages today and is built so a second kind of content costs a
-        # constant rather than a migration. Gating it on the wiki's permission would
-        # tie the general thing to its first consumer, and the second one would then
-        # need `page:write` to make a folder for files. It is not
-        # `project:administer` either: making a section is part of writing a wiki,
-        # not part of administering a project, and requiring an administrator would
-        # mean every new page either lands at the root or waits on somebody else.
-        page:read           "Read the project's wiki"
-        page:write          "Write, re-file and remove wiki pages"
-        category:manage     "Edit the sections the wiki is filed into"
+        # The library's file routes borrowed `project:browse` and `issue:edit`, on the
+        # argument that an attachment is part of what an issue discloses and a second
+        # permission beside it would be forgotten the first time somebody granted one.
+        # That held while an attachment was the only file this product had.
+        #
+        # It stopped holding when files got a TREE. `FilesAccessRules` gates the whole
+        # file surface — every file, every folder, every tree — with ONE pair, so with
+        # the issue permissions in that pair a member's own cabinet is reachable only
+        # by somebody who may browse a project, and the `ai/mcp` branch, which belongs
+        # to no project at all, is reachable by nobody. A permission named for issues
+        # cannot honestly gate a folder that has nothing to do with one.
+        #
+        # ⚠️ NOTHING IS NARROWED. Every role that had `project:browse` gets `file:read`
+        # beside it and every role that had `issue:edit` gets `file:write`, so whoever
+        # could open an attachment still can. What it buys is the ability to say
+        # something about files that is not also a sentence about issues — the same
+        # argument `page:read` won against `project:browse` before TSSR-0099 retired it.
+        file:read           "See the files filed here, and open them"
+        file:write          "Upload, rename, re-file and remove files, and arrange folders"
 
         project:administer  "Administer the project — settings, membership, roles, overrides"
 
@@ -156,7 +168,10 @@ policy "tessera" {
 
         # Reads the handbook, writes none of it — the same relationship it has to the
         # issues.
-        @PROJECT  page:read
+
+        # Opens the attachments on the issues it may already read, and adds none of
+        # them — the same relationship again.
+        @PROJECT  file:read
     }
 
     # Works on issues. Everything except deleting one and administering the project
@@ -174,9 +189,10 @@ policy "tessera" {
         # Writes the wiki and the sections it is filed into. Documenting what you are
         # building is part of building it, so neither of these waits on an
         # administrator.
-        @PROJECT  page:read
-        @PROJECT  page:write
-        @PROJECT  category:manage
+
+        # Attaches files to issues and arranges the folders they are filed into.
+        @PROJECT  file:read
+        @PROJECT  file:write
     }
 
     # Full control of the project, its settings and its membership.
@@ -189,10 +205,31 @@ policy "tessera" {
         @PROJECT  issue:transition
         @PROJECT  issue:delete
         @PROJECT  sprint:manage
-        @PROJECT  page:read
-        @PROJECT  page:write
-        @PROJECT  category:manage
+        @PROJECT  file:read
+        @PROJECT  file:write
         @PROJECT  project:administer
+    }
+
+    # ── The one role that is nobody's project ─────────────────────────────────
+    #
+    # ⚠️ THE FIRST THING EVER GRANTED AT @SELF, and the scope has been declared and
+    # unused since it was written. It carries no place because there is none to
+    # carry: `tessera/library` is a root PER MEMBER, so the folder's owner is the
+    # whole answer to who may open it, and asking about a project as well would be
+    # asking about somewhere the folder does not sit.
+    #
+    # ⚠️ IT IS ASSIGNED TO EVERY MEMBER, on provisioning, and that is what makes it
+    # honest rather than a wildcard: a grant nobody can see is a power nobody can
+    # take away, and this one is an ordinary row on the access screen like any other.
+    # Take it off somebody and their cabinet closes.
+    #
+    # ⚠️ AND IT REACHES NOTHING ELSE. `file:read @SELF` is only ever satisfied by a
+    # target that names an owner and no place — which, in this product, is a
+    # directory in somebody's own tree and nothing else. An attachment resolves to
+    # its issue's project, so this role cannot open one.
+    declare role MEMBER_CABINET assignable @SELF {
+        @SELF  file:read
+        @SELF  file:write
     }
 
     # ── The way back in ───────────────────────────────────────────────────────
@@ -231,6 +268,20 @@ policy "tessera" {
         @GLOBAL  configuration:administer
         @GLOBAL  ai:read
         @GLOBAL  ai:administer
+
+        # ⚠️ HELD GLOBALLY BECAUSE ONE BRANCH OF THE TREE BELONGS TO NO PROJECT.
+        # `tessera/attachments/ai/mcp/…` is where an assistant files something it has
+        # no ticket for yet, and the two shelves above the project folders —
+        # the root and `issues` — are in no project either. All three resolve to a
+        # target with no place, which only a @GLOBAL grant satisfies.
+        #
+        # It sits in THIS role rather than a fourth one for the reason written above:
+        # nothing in this product assigns a global role from a screen, so a role of
+        # its own would sit in the catalog held by nobody. And it belongs beside
+        # `ai:read` in particular — reading what the assistant filed is the same
+        # disclosure as reading what it did.
+        @GLOBAL  file:read
+        @GLOBAL  file:write
 
         # ⚠️ AND `member:administer`, for the third time and the same reason: nothing
         # assigns a global role from a screen, so a role of its own would sit in the

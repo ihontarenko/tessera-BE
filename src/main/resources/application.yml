@@ -310,12 +310,19 @@ jmouse:
       # ⚠️ THREE FILES, NOTHING CHECKS THEM: this key, the Vite proxy entry, and
       # `UI/src/api/attachments.ts`'s client.
       prefix: /jmouse-files/api
-      # OFF, and this is a product decision rather than a precaution: an attachment here hangs off the
-      # issue it was dropped onto. There are no folders to arrange, nothing to browse, and no
-      # StorageDirectory this product could resolve to a project — so the tree routes would answer every
-      # call with a refusal that reads as a broken route rather than as an absent feature.
+      # ON since TSSR-0103, reversing what stood here — that an attachment hangs off its issue, that there
+      # were no folders to arrange, and that no StorageDirectory this product could place meant the tree
+      # routes would refuse every call in a way that reads as a broken route.
+      #
+      # All three were true and the third is the one that was made false first:
+      # `StorageDirectoryAccessTargetResolver` places a folder now, so the routes answer. The other two
+      # stopped being true when files got a screen — the tree is what it browses.
+      #
+      # ⚠️ SWITCHED ON IN THE SAME CHANGE AS THE RESOLVER, for the same reason the endpoints above were
+      # switched on in the same change as their rules: between the flag and the resolver every directory
+      # route answers a refusal, and a refusal on the first call renders as an installation with no files.
       directories:
-        enabled: false
+        enabled: ${TESSERA_FILE_DIRECTORIES_ENABLED:true}
 
   storage:
     prefix: tessera.file

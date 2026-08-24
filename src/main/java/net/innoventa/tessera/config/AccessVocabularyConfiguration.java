@@ -129,11 +129,16 @@ public class AccessVocabularyConfiguration {
     public EffectivePermissionsResolver effectivePermissionsResolver(
             GrantStore      grants,
             ScopeCatalog    scopes,
+            ScopeHierarchy  hierarchy,
             ResolutionCache cache) {
+        // ⚠️ The hierarchy, since JMF-53. Without it a grant is matched against the place a request
+        // names and nothing above it, so a membership at a branch refuses everything inside that
+        // branch. It is the SAME bean the engine and the visibility resolver take — two answers to
+        // what contains what disagree the first time anything moves.
 
         // ⚠️ No ShareGrants: Tessera has no share links. The resolver takes null for "this
         // installation grants nothing through a token", which is correct rather than degraded.
-        return new EffectivePermissionsResolver(grants, scopes, cache, null);
+        return new EffectivePermissionsResolver(grants, scopes, hierarchy, cache, null);
     }
 
     /**

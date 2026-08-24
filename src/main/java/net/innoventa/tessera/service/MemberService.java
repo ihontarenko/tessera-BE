@@ -9,6 +9,7 @@ import net.innoventa.tessera.dto.MemberSummary;
 import net.innoventa.tessera.exception.ResourceNotFoundException;
 import net.innoventa.tessera.repository.MemberRepository;
 import net.innoventa.tessera.security.access.InstallationAccess;
+import net.innoventa.tessera.service.file.MemberFileTrees;
 import org.springframework.dao.DataIntegrityViolationException;
 import org.springframework.security.oauth2.jwt.Jwt;
 import org.springframework.stereotype.Service;
@@ -39,6 +40,9 @@ public class MemberService {
      * through it is what keeps the directory and the member mirror agreeing. See {@link #rename}.
      */
     private final AgentDirectory      agentDirectory;
+
+    /** Makes a new member's own file cabinet, once, on the way through provisioning them. */
+    private final MemberFileTrees     memberFileTrees;
 
     /**
      * Find-or-provision the local {@link Member} for a validated token. New subjects are provisioned
@@ -175,6 +179,18 @@ public class MemberService {
     }
 
     private Member provision(String subject, String displayName, String email) {
+        Member member = insert(subject, displayName, email);
+
+        // ⚠️ Here rather than in resolveMember, which runs on EVERY authenticated request. A member's own
+        // file cabinet is made once in their lifetime, so asking for it per request would be an indexed
+        // read on the hot path to discover, almost always, that there was nothing to do. Whoever predates
+        // this line is given one by FileRootSeedStep instead.
+        memberFileTrees.cabinetOf(member);
+
+        return member;
+    }
+
+    private Member insert(String subject, String displayName, String email) {
         try {
             // Insert in its own transaction (REQUIRES_NEW) so a losing racer's constraint violation
             // rolls back only that insert, not our transaction.

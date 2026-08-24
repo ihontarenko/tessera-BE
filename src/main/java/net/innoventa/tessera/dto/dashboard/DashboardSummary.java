@@ -12,18 +12,20 @@ import java.util.List;
  * shape in which a tracker leaks: "43 issues" across an installation somebody can see three projects of
  * discloses the other forty without naming one of them.
  *
- * <h2>Four questions, and each chart answers exactly one</h2>
+ * <h2>Five questions, and each chart answers exactly one</h2>
  *
  * <ul>
  *   <li><strong>Is the backlog growing?</strong> — {@code flowPerDay}, raised against resolved.
  *   <li><strong>What moved?</strong> — {@code movedInto}, counted as moves rather than as issues.
+ *   <li><strong>What is on the boards now?</strong> — {@code standing}, counted as issues.
  *   <li><strong>What is stuck?</strong> — {@code ageing}, days in the current status.
  *   <li><strong>What cannot move at all?</strong> — {@code blocked}, on the engine's own definition.
  * </ul>
  *
  * <p>Kept apart on purpose. Movement and standing are different questions, and answering one while
  * labelling it the other produces a chart that cannot change during a busy week that happens to end
- * where it started.
+ * where it started. {@code movedInto} and {@code standing} are that pair stated in full, which is why
+ * they carry the same shape and separate names.
  *
  * <h2>One endpoint, and why it is not the search</h2>
  *
@@ -38,6 +40,8 @@ import java.util.List;
  * @param resolvedInWindow issues that gained a resolution inside the window
  * @param flowPerDay       one row per day of the window, oldest first, zeros included
  * @param movedInto        which statuses issues entered during the window, busiest first
+ * @param standing         how many issues sit in each status right now, busiest first — open and
+ *                         unarchived only, so the counts sum to {@code openTotal}
  * @param projects         one row per browsable project, whether or not it holds any issues
  * @param ageing           the longest-sitting open issues, oldest first — capped, see {@code openTotal}
  * @param openTotal        how many open issues there are in total, so a capped chart can say so rather
@@ -53,6 +57,7 @@ public record DashboardSummary(
     long resolvedInWindow,
     List<FlowPoint> flowPerDay,
     List<StatusMovement> movedInto,
+    List<StatusStanding> standing,
     List<ProjectProgress> projects,
     List<AgeingIssue> ageing,
     long openTotal,

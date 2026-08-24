@@ -79,6 +79,15 @@ policy "tessera/tools" {
         tool:issues_archive_completed  "File every resolved issue away at once, through a tool"
         tool:issues_unarchive          "Bring a filed issue back through a tool"
 
+        # Files
+        #
+        # ⚠️ THE ONE ACTION THAT IS IN NO PROJECT. Everything else here is confined to a project by the
+        # time it runs; this keeps a file that has no issue to hang on, in a branch of the tree that
+        # belongs to the installation. So the tool switch says WHETHER an agent may keep files, and
+        # `file:write @GLOBAL` — in `tessera.jmp` — is what says whether the person it acts as may. Both
+        # are needed, which is the whole shape of the second axis rather than an exception to it.
+        tool:files_upload              "Keep a file that is not on an issue, through a tool"
+
         # Boards
         tool:boards_list               "List a project's boards through a tool"
         tool:boards_read               "Read a board's columns and cards through a tool"
@@ -140,6 +149,12 @@ policy "tessera/tools" {
 
         @GLOBAL  tool:issues_archive
         @GLOBAL  tool:issues_unarchive
+
+        # ⚠️ IN THE BUNDLE, and it adds nothing on its own. The switch says an agent may keep a file
+        # with no issue on it; whether anything is actually written still depends on `file:write` held
+        # at @GLOBAL by whoever the agent acts as. An agent given every tool and no global file
+        # permission is refused here and correctly.
+        @GLOBAL  tool:files_upload
 
         @GLOBAL  tool:boards_list
         @GLOBAL  tool:boards_read

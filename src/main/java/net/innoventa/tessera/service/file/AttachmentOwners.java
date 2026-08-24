@@ -3,14 +3,20 @@ package net.innoventa.tessera.service.file;
 import org.jmouse.files.OwnerReference;
 
 /**
- * What a file is filed against in a tracker: an issue.
+ * What a file is filed against in a tracker: an issue, and — since TSSR-0103 — the folder it also sits in.
  *
- * <h2>⚠️ No directory, and that is the whole shape of it here</h2>
+ * <h2>⚠️ An attachment is filed TWICE, and neither binding is redundant</h2>
  *
- * <p>{@code jmouse-files} ships a directory tree, and Tessera does not switch it on. An attachment
- * belongs to the issue it was dropped onto — there is nothing to browse, no folders to arrange, and a
- * tree would be machinery in exchange for nothing. The library's three pieces are separable precisely so
- * this is a choice rather than a price.</p>
+ * <p>This class used to say the opposite: that Tessera left the library's directory tree switched off
+ * because an attachment belongs to the issue it was dropped onto and there was nothing to browse. That
+ * was true while there was no Files screen. There is one now, and it browses a tree — so an attachment
+ * carries {@code ISSUE:<id>} <em>and</em> {@code DIRECTORY:<id>}, which is the case {@code file_bindings}
+ * exists as a table for rather than a workaround for its absence.</p>
+ *
+ * <p>⚠️ <strong>The issue binding is still the load-bearing one.</strong> Every permission question
+ * about an attachment is answered through it — the folder is organisation for people. Re-filing an
+ * attachment into a different folder therefore moves nothing about who may read it, and that is
+ * deliberate: see {@link FileTrees}.</p>
  */
 public final class AttachmentOwners {
 
@@ -20,10 +26,15 @@ public final class AttachmentOwners {
     /**
      * Where attachment bytes are laid out.
      *
-     * <p>⚠️ A storage-key namespace, not a directory path — the two are the same string in a product
-     * that has directories and this one does not.</p>
+     * <p>⚠️ <strong>The same string as the tree's root, and that is the mechanism rather than a
+     * coincidence.</strong> A root's path is handed to the storage key as its namespace, so this
+     * constant and {@link FileTrees#ATTACHMENTS_ROOT} must never be allowed to become two values —
+     * hence one of them, referenced.</p>
+     *
+     * <p>⚠️ It is also why switching the tree on moved no bytes: the namespace was already this, and
+     * folders deeper than a root contribute nothing to a key.</p>
      */
-    public static final String NAMESPACE = "tessera/attachments";
+    public static final String NAMESPACE = FileTrees.ATTACHMENTS_ROOT;
 
     private AttachmentOwners() {
     }

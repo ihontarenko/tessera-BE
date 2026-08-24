@@ -69,36 +69,32 @@ public final class Permissions {
     public static final String ADD_COMMENT = "comment:write";
 
     public static final String MANAGE_SPRINT = "sprint:manage";
-
     /**
-     * Read the project's wiki (TSSR-16).
+     * Listing and reading files — an issue's attachments, and whatever else is filed in the tree.
      *
-     * <p>⚠️ <strong>Its own permission rather than {@link #BROWSE_PROJECT}</strong>, and the reason is
-     * that a wiki is not a view of the issues. Everything {@code project:browse} covers is the work
-     * itself; a wiki is prose beside it — a runbook, a set of credentials-adjacent conventions, a
-     * decision that outlived its ticket — and an installation that wants a contractor on the board and
-     * not in the handbook has nowhere to say so if the two are one permission. Every project role
-     * carries both today, so nothing is narrowed by its existence; what it buys is the ability to take
-     * one away.
+     * <h3>⚠️ Its own permission, reversing what {@code AttachmentsAccess} used to say</h3>
+     *
+     * <p>The file routes borrowed {@link #BROWSE_PROJECT} and {@link #EDIT_ISSUE} while an attachment was
+     * the only file this product had. The reasoning was sound then: an attachment is part of what an
+     * issue discloses, and a second permission beside it would be granted separately the first time
+     * somebody forgot.</p>
+     *
+     * <p>It stopped being sound when files got a tree of their own (TSSR-0102). ⚠️ <strong>The library
+     * gates its whole file surface with ONE pair of permissions</strong> — files and directories, every
+     * tree at once — so borrowing the issue permissions means a personal file cabinet can only be reached
+     * by somebody who may browse a project, and a folder that belongs to nobody's project is reachable by
+     * nobody. Two of the three trees are not about issues, and a permission named for issues cannot
+     * honestly gate them.</p>
+     *
+     * <p>Nothing is narrowed by the change: every project role below carries both of these alongside the
+     * permissions it already had, so whoever could see an attachment still can. What it buys is the
+     * ability to say something about files that is not also a sentence about issues — which is exactly
+     * the argument {@link #READ_PAGE} won against {@link #BROWSE_PROJECT}.</p>
      */
-    public static final String READ_PAGE = "page:read";
+    public static final String READ_FILE = "file:read";
 
-    /** Write, rename, re-file and remove wiki pages. ⚠️ Deleting one is permanent — there is no history. */
-    public static final String WRITE_PAGE = "page:write";
-
-    /**
-     * Edit the project's category tree — the sections the wiki (and later anything else) is filed into.
-     *
-     * <p>⚠️ <strong>Not {@link #WRITE_PAGE}, on purpose.</strong> The tree is deliberately agnostic: it
-     * holds pages today and is built so a second kind of content costs a constant (TSSR-15). Gating it on
-     * the wiki's permission would tie the general thing to its first consumer, and the second consumer
-     * would then arrive needing {@code page:write} to make a folder for files.
-     *
-     * <p>⚠️ And not {@link #ADMINISTER_PROJECT} either, which is the other tempting answer. Making a
-     * section is part of writing a wiki, not part of administering a project; requiring an administrator
-     * for it would mean every new page either lands at the root or waits on somebody else.
-     */
-    public static final String MANAGE_CATEGORY = "category:manage";
+    /** Uploading, renaming, re-filing and deleting files, and arranging the folders they sit in. */
+    public static final String WRITE_FILE = "file:write";
 
     /** Settings, membership, roles and personal overrides — the project's own administration. */
     public static final String ADMINISTER_PROJECT = "project:administer";
@@ -183,9 +179,6 @@ public final class Permissions {
             DELETE_ISSUE,
             ADD_COMMENT,
             MANAGE_SPRINT,
-            READ_PAGE,
-            WRITE_PAGE,
-            MANAGE_CATEGORY,
             ADMINISTER_PROJECT,
             ADMINISTER_ACCESS,
             ADMINISTER_CONFIGURATION,

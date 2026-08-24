@@ -16,11 +16,22 @@ import org.springframework.context.annotation.Configuration;
  * rule that is being honoured. So the requirement moves instead of the enforcement, and the same engine
  * answers it on the same axes as every route Tessera wrote itself.</p>
  *
- * <h2>⚠️ Reading an attachment is reading the issue</h2>
+ * <h2>⚠️ Files have their own two permissions now, and this class used to argue the opposite</h2>
  *
- * <p>{@code project:browse} for reading and {@code issue:edit} for writing, rather than a {@code file:*} of their own. An attachment is part
- * of what an issue discloses; a second permission beside it would be granted separately the first time
- * somebody forgot, and the two would then mean different things with nothing to say which was meant.</p>
+ * <p>It said: {@code project:browse} to read and {@code issue:edit} to write, rather than a
+ * {@code file:*} of their own — an attachment being part of what an issue discloses, and a second
+ * permission beside it being the sort of thing somebody forgets to grant. That was right while an
+ * attachment was the only file this product had.</p>
+ *
+ * <p>⚠️ <strong>It stopped being right when files got a tree (TSSR-0102).</strong> The builder below
+ * takes ONE pair of permissions and one scope for the <em>whole</em> file surface — every file, every
+ * folder, every tree. With the issue permissions in that pair, a member's own cabinet could only be
+ * opened by somebody who may browse a project, and the branch an assistant files into, which belongs to
+ * no project at all, could be opened by nobody.</p>
+ *
+ * <p>Nothing narrowed in the swap: every project role carries {@code file:read} beside
+ * {@code project:browse} and {@code file:write} beside {@code issue:edit}. What changed is that there is
+ * now something to say about files that is not also a sentence about issues.</p>
  *
  * <p>⚠️ <strong>The far end of a re-file is not covered by this and cannot be.</strong> Moving an
  * attachment to another issue names the destination in the request body, where no rule can see it —
@@ -38,8 +49,8 @@ public class AttachmentsAccess {
     @Bean
     public ExternalAccessRules attachmentAccessRules() {
         return FilesAccessRules.atScope(Scopes.PROJECT)
-                .reading(Permissions.BROWSE_PROJECT)
-                .writing(Permissions.EDIT_ISSUE)
+                .reading(Permissions.READ_FILE)
+                .writing(Permissions.WRITE_FILE)
                 // ⚠️ Declared even though the surface is not mounted here. It is one line, and the
                 // alternative is a GLOBAL disclosure of every stored object in the installation
                 // inheriting the PROJECT-scoped write rule the moment somebody sets the property.

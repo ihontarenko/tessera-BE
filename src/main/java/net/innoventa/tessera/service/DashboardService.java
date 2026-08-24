@@ -11,6 +11,7 @@ import net.innoventa.tessera.dto.dashboard.DashboardSummary;
 import net.innoventa.tessera.dto.dashboard.FlowPoint;
 import net.innoventa.tessera.dto.dashboard.ProjectProgress;
 import net.innoventa.tessera.dto.dashboard.StatusMovement;
+import net.innoventa.tessera.dto.dashboard.StatusStanding;
 import net.innoventa.tessera.repository.ActivityLogItemRepository;
 import net.innoventa.tessera.repository.IssueRepository;
 import net.innoventa.tessera.repository.LastStatusChange;
@@ -28,6 +29,7 @@ import java.time.LocalDateTime;
 import java.util.ArrayList;
 import java.util.Comparator;
 import java.util.HashMap;
+import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.function.Function;
@@ -44,13 +46,16 @@ import java.util.stream.Collectors;
  * somebody who can see three projects that there are forty issues they cannot. A member on no project
  * gets zeros rather than an error, because "nothing to show" is a true and unremarkable state.
  *
- * <h2>⚠️ Four questions, kept apart</h2>
+ * <h2>⚠️ Five questions, kept apart</h2>
  *
- * <p><strong>Flow</strong> — raised against resolved — is the only one of the four that can say whether
+ * <p><strong>Flow</strong> — raised against resolved — is the only one of the five that can say whether
  * the backlog is growing. <strong>Movement</strong> comes from the activity log and counts moves rather
- * than issues. <strong>Ageing</strong> is how long an open issue has sat where it is, which is the
- * question a board is structurally unable to answer. <strong>Blocked</strong> is the engine's own
- * definition, asked of {@link IssueBlockers} rather than restated here.
+ * than issues. <strong>Standing</strong> counts issues where they sit right now, and is movement's
+ * other half: the two carry the same shape, answer opposite questions, and cannot be read off one
+ * another — a week of furious movement can end with the boards exactly as they started.
+ * <strong>Ageing</strong> is how long an open issue has sat where it is, which is the question a board
+ * is structurally unable to answer. <strong>Blocked</strong> is the engine's own definition, asked of
+ * {@link IssueBlockers} rather than restated here.
  *
  * <p>Answering one and labelling it another is the easy mistake, and it produces charts that cannot
  * change during a busy week that happens to end where it started.
@@ -109,7 +114,7 @@ public class DashboardService {
         if (projectIds.isEmpty()) {
             return new DashboardSummary(
                 0, 0, 0, flow(List.of(), List.of(), first, today),
-                List.of(), List.of(), List.of(), 0, List.of(), 0, days);
+                List.of(), List.of(), List.of(), List.of(), 0, List.of(), 0, days);
         }
 
         LocalDateTime windowOpened = first.atStartOfDay();
@@ -119,6 +124,13 @@ public class DashboardService {
         List<Issue>         open     = issueRepository
             .findByProjectIdInAndResolutionIdIsNullAndArchivedAtIsNull(projectIds);
 
+        // ⚠️ Read once and handed down. Three of the sections below need the catalogue — movement by
+        // name, standing and ageing by id — and re-reading it per section is three round trips for a
+        // table that cannot change inside one transaction.
+        List<Status>        catalogue = statusRepository.findAll();
+        Map<String, Status> byId      = catalogue.stream()
+            .collect(Collectors.toMap(Status::getId, Function.identity()));
+
         List<BlockedIssue> blocked = blocked(open, now);
 
         return new DashboardSummary(
@@ -126,9 +138,10 @@ public class DashboardService {
             created.size(),
             resolved.size(),
             flow(created, resolved, first, today),
-            movement(projectIds, windowOpened),
+            movement(catalogue, projectIds, windowOpened),
+            standing(open, catalogue, byId),
             progress(projectIds),
-            ageing(projectIds, open, now),
+            ageing(projectIds, open, byId, now),
             open.size(),
             blocked.stream().limit(LONGEST_ROWS).toList(),
             blocked.size(),
@@ -177,8 +190,10 @@ public class DashboardService {
      * happened. It comes back with a null category, which the screen draws in neutral rather than
      * pretending to know which bucket it was.
      */
-    private List<StatusMovement> movement(List<String> projectIds, LocalDateTime from) {
-        Map<String, StatusCategory> categories = statusRepository.findAll().stream()
+    private List<StatusMovement> movement(
+        List<Status> catalogue, List<String> projectIds, LocalDateTime from) {
+
+        Map<String, StatusCategory> categories = catalogue.stream()
             .collect(Collectors.toMap(Status::getName, Status::getCategory, (first, second) -> first));
 
         return activityLogItemRepository.countMovesIntoStatusSince(projectIds, from).stream()
@@ -189,6 +204,63 @@ public class DashboardService {
     }
 
     // ── Standing ──────────────────────────────────────────────────────────────
+
+    /**
+     * Where the open work actually is, busiest status first.
+     *
+     * <p>⚠️ <strong>Counted from the issues already in hand, not from a second query.</strong> The
+     * open set is loaded once for ageing and blocking and it is exactly the population this chart is
+     * about — unresolved and unarchived, which is what "on a board" means. A {@code GROUP BY} would
+     * be a third round trip returning a subset of rows already in memory.
+     *
+     * <p>⚠️ <strong>The counts sum to {@code openTotal}, and that is the point of the pairing.</strong>
+     * Movement counts moves and can exceed the number of issues that exist; standing counts issues and
+     * cannot. Two charts side by side that looked alike and did not agree would be read as a bug.
+     *
+     * <p>⚠️ <strong>An empty status is reported as a zero, not omitted.</strong> Same reasoning as the
+     * flow series filling in its quiet days: a chart built only from the statuses that happen to hold
+     * something cannot say <em>nothing is in review</em> — the row simply is not there, and an absent
+     * bar and an absent status look identical. "Nothing is in review" is one of the more useful things
+     * a board-wide picture can tell somebody.
+     *
+     * <p>⚠️ <strong>Done-category statuses are zero-filled out, because entering one requires a
+     * resolution</strong> — so an open issue can never be sitting in one, and the bar would read zero
+     * for ever. One that somehow holds an issue anyway is still reported: the count comes from the
+     * issues, and an anomaly worth seeing must not be filtered away by a rule about what should be
+     * impossible.
+     *
+     * <p>⚠️ <strong>An issue whose status the catalogue has lost is named by its identifier rather than
+     * skipped.</strong> Same reasoning as the other two sections: it is genuinely sitting somewhere,
+     * and a picture of the boards that quietly omits part of them is worse than no picture.
+     */
+    private List<StatusStanding> standing(
+        List<Issue> open, List<Status> catalogue, Map<String, Status> byId) {
+
+        Map<String, StatusStanding> rows = new LinkedHashMap<>();
+
+        for (Status status : catalogue) {
+            if (status.getCategory() != StatusCategory.DONE) {
+                rows.put(status.getId(), new StatusStanding(status.getName(), status.getCategory(), 0));
+            }
+        }
+
+        Map<String, Long> counted = open.stream()
+            .collect(Collectors.groupingBy(Issue::getStatusId, Collectors.counting()));
+
+        counted.forEach((statusId, count) -> {
+            Status status = byId.get(statusId);
+
+            rows.put(statusId, new StatusStanding(
+                status == null ? statusId : status.getName(),
+                status == null ? null : status.getCategory(),
+                count));
+        });
+
+        return rows.values().stream()
+            .sorted(Comparator.comparingLong(StatusStanding::count).reversed()
+                .thenComparing(StatusStanding::status))
+            .toList();
+    }
 
     /**
      * Each project's three numbers.
@@ -231,17 +303,16 @@ public class DashboardService {
      * the movement chart: the issue is still sitting there, and a chart of what is stuck that quietly
      * omits some of it is worse than no chart.
      */
-    private List<AgeingIssue> ageing(List<String> projectIds, List<Issue> open, LocalDateTime now) {
+    private List<AgeingIssue> ageing(
+        List<String> projectIds, List<Issue> open, Map<String, Status> byId, LocalDateTime now) {
+
         Map<String, LocalDateTime> movedAt = activityLogItemRepository
             .lastStatusChangePerOpenIssue(projectIds).stream()
             .collect(Collectors.toMap(LastStatusChange::issueId, LastStatusChange::at));
 
-        Map<String, Status> statuses = statusRepository.findAll().stream()
-            .collect(Collectors.toMap(Status::getId, Function.identity()));
-
         return open.stream()
             .map(issue -> {
-                Status status = statuses.get(issue.getStatusId());
+                Status status = byId.get(issue.getStatusId());
 
                 return new AgeingIssue(
                     issue.getIssueKey(),

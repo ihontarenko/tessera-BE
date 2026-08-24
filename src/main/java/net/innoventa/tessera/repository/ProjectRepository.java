@@ -17,6 +17,16 @@ public interface ProjectRepository extends JpaRepository<Project, String> {
      */
     Optional<Project> findByKey(String key);
 
+    /**
+     * The same question asked of a value that has been through a slug.
+     *
+     * <p>⚠️ <strong>A file directory's path is lower-cased</strong> — {@code DirectorySlugs} sees to
+     * that — so {@code tessera/attachments/issues/tssr} names the project {@code TSSR} and
+     * {@link #findByKey} would answer empty about it. Which, on the authorization path that reads a
+     * folder's project, renders as <em>no such folder</em> for every folder there is.</p>
+     */
+    Optional<Project> findByKeyIgnoreCase(String key);
+
     List<Project> findByIdInOrderByKeyAsc(List<String> ids);
 
     /** Which projects a scheme is in force in — the "used by Innoventa, Moneta" panel, and the refusal. */

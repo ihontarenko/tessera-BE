@@ -36,6 +36,20 @@ public final class Roles {
      */
     public static final String GLOBAL_ACCESS_ADMINISTRATOR = "GLOBAL_ACCESS_ADMINISTRATOR";
 
+    /**
+     * A member's own file cabinet — the one role held at {@code @SELF} rather than at a place.
+     *
+     * <p>⚠️ <strong>Given to every member as they are provisioned</strong>, and an ordinary row after
+     * that: it shows on the access screen, it can be taken away, and taking it away closes that person's
+     * cabinet. A capability every member has is still a grant here rather than a rule in code, because a
+     * power nobody can see is a power nobody can withdraw.</p>
+     *
+     * <p>⚠️ It reaches nothing but a folder in that member's own tree. {@code file:read @SELF} is only
+     * satisfied by a target naming an owner and no place, and an attachment resolves to its issue's
+     * project instead — so this role cannot open one.</p>
+     */
+    public static final String MEMBER_CABINET = "MEMBER_CABINET";
+
     /** The three a person may be given in a project, widest last — the order a picker offers them in. */
     public static final List<String> PROJECT_ROLES =
             List.of(PROJECT_VIEWER, PROJECT_DEVELOPER, PROJECT_ADMINISTRATOR);

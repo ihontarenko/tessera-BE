@@ -44,14 +44,9 @@ import net.innoventa.tessera.service.file.AttachmentOwners;
 import org.jmouse.files.jpa.ManagedFile;
 import org.jmouse.files.management.FileManagement;
 import org.jmouse.storage.Content;
-import org.springframework.beans.factory.annotation.Value;
 import org.springframework.stereotype.Component;
 
 import java.io.ByteArrayInputStream;
-import java.io.IOException;
-import java.nio.file.Files;
-import java.nio.file.Path;
-import java.util.Base64;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.List;
@@ -97,13 +92,12 @@ public class IssueTool implements ToolDefinition {
     private final FileManagement     files;
 
     /**
-     * The one directory {@code issues_attach} may read a file from, or blank to refuse the form entirely.
+     * How a file arrives — the two forms, and the disk-reading capability among them.
      *
-     * <p>Reading this server’s disk on a caller’s word is a capability rather than a convenience, so it
-     * is off until somebody names the directory it is allowed in.</p>
+     * <p>⚠️ Moved out to {@link ToolFileBytes} when {@code files_upload} became the second action to
+     * carry bytes. Two copies would be two answers to <em>may this server read that path</em>.</p>
      */
-    @Value("${tessera.protocol.upload-root:}")
-    private String uploadRoot;
+    private final ToolFileBytes      fileBytes;
 
     @Override
     public String toolName() {
@@ -870,7 +864,7 @@ public class IssueTool implements ToolDefinition {
     private Object handleAttach(ToolInvocation invocation) {
         Issue  issue = requireIssue(invocation, invocation.requiredString("issueKey"));
         String name  = invocation.requiredString("name");
-        byte[] bytes = bytesOf(invocation);
+        byte[] bytes = fileBytes.of(invocation);
 
         // ⚠️ THE UPLOADER IS THE AGENT, NOT ITS OWNER — the same rule V000034 settled for comments:
         // "the author IS the agent". Written as `actingSubject` this hung every file an assistant
@@ -1219,68 +1213,6 @@ public class IssueTool implements ToolDefinition {
      * winner would mean a caller who sent two different files gets one of them silently, and never finds
      * out which.</p>
      */
-    private byte[] bytesOf(ToolInvocation invocation) {
-        String encoded = invocation.optionalString("base64").orElse(null);
-        String path    = invocation.optionalString("path").orElse(null);
-
-        boolean hasEncoded = encoded != null && !encoded.isBlank();
-        boolean hasPath    = path != null && !path.isBlank();
-
-        if (hasEncoded == hasPath) {
-            throw new ToolRefusedException(RefusalReason.INVALID_ARGUMENT,
-                    "Send the file one way: 'base64' with the bytes in it, or 'path' pointing at a local "
-                    + "file. Neither was given, or both were.");
-        }
-
-        if (hasEncoded) {
-            try {
-                return Base64.getDecoder().decode(encoded.trim());
-            } catch (IllegalArgumentException malformed) {
-                throw new ToolRefusedException(RefusalReason.UNPARSEABLE_VALUE,
-                        "'base64' is not base64. Send the file's bytes encoded, with no data: prefix.");
-            }
-        }
-
-        return readFromDisk(path.trim());
-    }
-
-    /**
-     * A file from the server's own disk — and only from underneath the configured root.
-     *
-     * <p>⚠️ <strong>The root is resolved and the target is compared against the resolved form</strong>, so
-     * {@code ../} climbs out of nothing. A prefix check against the raw string is the version of this that
-     * looks right and is not.</p>
-     *
-     * <p>⚠️ And the whole form is <strong>off unless configured</strong>. Reading this server's disk on a
-     * caller's word is a capability rather than a convenience: unset, it refuses and says so.</p>
-     */
-    private byte[] readFromDisk(String path) {
-        if (uploadRoot == null || uploadRoot.isBlank()) {
-            throw new ToolRefusedException(RefusalReason.MISSING_PERMISSION,
-                    "This installation does not read files from disk. Send the bytes as 'base64' instead "
-                    + "— or set 'tessera.protocol.upload-root' to the one directory uploads may come from.");
-        }
-
-        Path root   = Path.of(uploadRoot).toAbsolutePath().normalize();
-        Path target = Path.of(path).toAbsolutePath().normalize();
-
-        if (!target.startsWith(root)) {
-            throw new ToolRefusedException(RefusalReason.MISSING_PERMISSION,
-                    "That path is outside the directory this installation reads uploads from (%s)."
-                            .formatted(root));
-        }
-
-        if (!Files.isRegularFile(target)) {
-            throw new ToolRefusedException(RefusalReason.NOTHING_TO_ACT_ON, "There is no file at " + target + ".");
-        }
-
-        try {
-            return Files.readAllBytes(target);
-        } catch (IOException unreadable) {
-            throw new ToolRefusedException(RefusalReason.NOTHING_TO_ACT_ON,
-                    "That file could not be read: " + unreadable.getMessage());
-        }
-    }
 
     private Issue requireIssue(ToolInvocation invocation, String issueKey) {
         Issue issue = issueRepository.findByIssueKey(issueKey).orElseThrow(() ->
