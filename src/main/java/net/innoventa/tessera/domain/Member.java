@@ -59,8 +59,15 @@ public class Member implements AvatarOwner {
     @Builder.Default
     private AvatarChoice avatarKind = AvatarChoice.INITIALS;
 
-    /** The seed a generated pixel face is drawn from, when {@link #avatarKind} is {@code PRESET}. */
-    @Column(name = "avatar_preset", length = 64)
+    /**
+     * What a generated face is drawn from, when {@link #avatarKind} is {@code PRESET}.
+     *
+     * <p>⚠️ A <strong>descriptor</strong> — strategy, seed and that strategy's settings — not a bare
+     * seed. 64 fitted the bare seed this held before the drawing engine became a shared package; the
+     * ceiling is now the one {@code AvatarDescriptors} states, and this annotation has to agree with
+     * the migration or generated DDL and Flyway describe two different columns.</p>
+     */
+    @Column(name = "avatar_preset", length = 512)
     private String avatarPreset;
 
     /**
@@ -124,10 +131,15 @@ public class Member implements AvatarOwner {
         avatarFile   = null;
     }
 
-    /** Wear a generated pixel face, drawn from {@code seed}. */
-    public void wearsPreset(String seed) {
+    /**
+     * Wear a generated face, drawn from {@code descriptor}.
+     *
+     * <p>⚠️ A descriptor — strategy, seed and that strategy's settings — not a bare seed. A bare seed
+     * is still valid forever and reads as the classic generator; see {@code AvatarDescriptors}.</p>
+     */
+    public void wearsPreset(String descriptor) {
         avatarKind   = AvatarChoice.PRESET;
-        avatarPreset = seed;
+        avatarPreset = descriptor;
         avatarFile   = null;
     }
 
@@ -162,7 +174,7 @@ public class Member implements AvatarOwner {
     }
 
     @Override
-    public String avatarSeed() {
+    public String avatarDescriptor() {
         return avatarPreset;
     }
 
