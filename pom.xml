@@ -159,6 +159,16 @@
              ⚠️ The permission half only. The axes are independent, and a product with no
              CapabilityCatalog has no entitlement axis and nothing refusing with 402. Tessera sells
              nothing yet; capabilities wait until it does. -->
+        <!-- jMQ — the shared filter builder. ⚠️ Beside the jME board filter, not instead of it: that one
+             marks loaded cards over a rich object graph and stays. This one answers WHICH issues, in SQL,
+             so paging and counts are real. Tessera contributes a QuerySubject and a schema; the composer,
+             the decomposer and the two addresses are the library's and are identical in every product. -->
+        <dependency>
+            <groupId>org.jmouse</groupId>
+            <artifactId>jmouse-query-spring-boot</artifactId>
+            <version>${jmouse.version}</version>
+        </dependency>
+
         <dependency>
             <groupId>org.jmouse</groupId>
             <artifactId>jmouse-access</artifactId>

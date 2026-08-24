@@ -97,17 +97,28 @@ class FilterGrammarReferenceTest {
     @Test
     @DisplayName("the documented pitfalls are still real")
     void keepsThePitfallWarningsTrue() {
+        // ⚠️ This assertion is INVERTED from what it was, and that is the point of the test working.
+        // `in` used to swallow everything after it — `a in ['x'] and b` parsed as `a in (['x'] and b)`,
+        // whose right side is a boolean, so membership was false for every row, silently. The language
+        // now binds the right operand at `in`'s own precedence, so the expression groups the way it
+        // reads. The warning was removed from the reference rather than left to mislead people.
         assertThat(evaluator.matchingIssueIds(
             "issue.priority.name in ['Highest','High'] and issue.resolution is null", BOARD, CALLER, NOW))
-            .as("unbracketed `in` still mis-parses, so the warning stands")
-            .isEmpty();
+            .as("`in` binds its own right operand now, so combining it with `and` needs no brackets")
+            .isEqualTo(evaluator.matchingIssueIds(
+                "(issue.priority.name in ['Highest','High']) and issue.resolution is null",
+                BOARD, CALLER, NOW));
 
+        // ⚠️ Also inverted. A single-element list used to answer false; it agrees with `hasAny` now.
+        // `hasAny` remains the better thing to write and the tests section still recommends it — but a
+        // recommendation is not a pitfall, and it was removed from that section rather than left saying
+        // the language is broken when it is not.
         assertThat(evaluator.matchingIssueIds("'api' in issue.labels", BOARD, CALLER, NOW))
-            .as("single-element `in` still misbehaves, so the hasAny advice stands")
-            .isEmpty();
+            .as("membership in a one-element list answers the same as hasAny now")
+            .containsExactly("issue-1");
 
         assertThat(evaluator.matchingIssueIds("issue.labels is hasAny(['api'])", BOARD, CALLER, NOW))
-            .as("and the advised form works")
+            .as("and the recommended form still works")
             .containsExactly("issue-1");
     }
 

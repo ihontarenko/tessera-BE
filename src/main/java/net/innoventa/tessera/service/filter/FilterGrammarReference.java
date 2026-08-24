@@ -55,7 +55,7 @@ public class FilterGrammarReference {
         new GrammarEntry("< <= > >=", "Ordering, including instants"),
         new GrammarEntry("and or not", "Combine predicates"),
         new GrammarEntry("is null", "Absence — issue.resolution is null means the issue is open"),
-        new GrammarEntry("x in [a, b]", "Membership in a literal list. WRAP IT IN BRACKETS when combining with `and`")
+        new GrammarEntry("x in [a, b]", "Membership in a literal list")
     );
 
     private static final List<GrammarEntry> FILTERS = List.of(
@@ -101,14 +101,14 @@ public class FilterGrammarReference {
      * reading their expression, because it looks right.
      */
     private static final List<GrammarEntry> PITFALLS = List.of(
-        new GrammarEntry(
-            "Bracket `in` when combining",
-            "`a in ['x'] and b` reads as `a in (['x'] and b)` and answers false. "
-                + "Write `(a in ['x']) and b`."),
-        new GrammarEntry(
-            "Use hasAny for list membership",
-            "`'x' in issue.labels` misbehaves when the issue has exactly one label. "
-                + "Write `issue.labels is hasAny(['x'])`."),
+        // ⚠️ "Bracket `in` when combining" used to be the first entry here, and it is GONE because the
+        // language fixed it: `in` now binds its right operand at its own precedence, so
+        // `a in ['x'] and b` groups the way it reads. Leaving the advice in would have taught people to
+        // write brackets that do nothing — and the test that guards this section is what noticed.
+        // ⚠️ "Use hasAny for list membership" is gone from HERE for the same reason: `'x' in issue.labels`
+        // no longer misbehaves on a single-element list. `hasAny` is still the better thing to write, and
+        // the tests section says so — but a recommendation is not a pitfall, and listing it as one told
+        // people the language was broken when it was not.
         new GrammarEntry(
             "A filter must ask a yes/no question",
             "`issue.summary` is a value, not a question. Compare it or use `is`.")

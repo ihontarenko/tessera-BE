@@ -70,11 +70,13 @@ public class IssueSearchController {
         @RequestParam(required = false) String assigneeMemberId,
         @RequestParam(defaultValue = "false") boolean openOnly,
         @RequestParam(defaultValue = "false") boolean includeArchived,
+        @RequestParam(name = "jmq:filter", required = false) String jmqFilter,
+        @RequestParam(name = "jmq:order", required = false) String jmqOrder,
         @RequestParam(defaultValue = "0") int page,
         @RequestParam(defaultValue = "25") int size
     ) {
         return issueSearchService.search(jwt, text, projectId, statusId, assigneeMemberId, openOnly,
-            includeArchived, page, size);
+            includeArchived, jmqFilter, jmqOrder, page, size);
     }
 
     /**

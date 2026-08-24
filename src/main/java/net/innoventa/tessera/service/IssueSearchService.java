@@ -8,6 +8,8 @@ import net.innoventa.tessera.dto.issue.IssueRowResponse;
 import net.innoventa.tessera.dto.issue.IssueSearchResponse;
 import net.innoventa.tessera.repository.IssueRepository;
 import net.innoventa.tessera.repository.ProjectRepository;
+import net.innoventa.tessera.service.query.IssueQueries;
+import org.jmouse.query.spring.builder.QueryRunner;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
@@ -18,6 +20,7 @@ import org.springframework.transaction.annotation.Transactional;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Objects;
 import java.util.function.Function;
 import java.util.stream.Collectors;
 
@@ -47,6 +50,7 @@ public class IssueSearchService {
     private final BrowsableProjects browsableProjects;
     private final MemberService memberService;
     private final IssueAssembler issueAssembler;
+    private final IssueQueries issueQueries;
 
     @Transactional(readOnly = true)
     public IssueSearchResponse search(
@@ -60,8 +64,32 @@ public class IssueSearchService {
         int page,
         int size
     ) {
+        return search(jwt, text, projectId, statusId, assigneeMemberId, openOnly, includeArchived,
+            null, null, page, size);
+    }
+
+    /**
+     * The same, with a jMQ expression.
+     *
+     * <p>Resolving the member stays here rather than in the controller: a route hands over the token it
+     * was given, and who that is remains one service's answer.
+     */
+    @Transactional(readOnly = true)
+    public IssueSearchResponse search(
+        Jwt jwt,
+        String text,
+        String projectId,
+        String statusId,
+        String assigneeMemberId,
+        boolean openOnly,
+        boolean includeArchived,
+        String jmqFilter,
+        String jmqOrder,
+        int page,
+        int size
+    ) {
         return search(memberService.resolveMember(jwt), text, projectId, statusId, assigneeMemberId,
-            openOnly, includeArchived, page, size);
+            openOnly, includeArchived, jmqFilter, jmqOrder, page, size);
     }
 
     /**
@@ -83,6 +111,36 @@ public class IssueSearchService {
         int page,
         int size
     ) {
+        return search(caller, text, projectId, statusId, assigneeMemberId, openOnly, includeArchived,
+            null, null, page, size);
+    }
+
+    /**
+     * The same search, narrowed by a jMQ expression as well.
+     *
+     * <p>⚠️ The two ways of narrowing stay separate on purpose. The parameters above are the screen's own
+     * controls, each of which the repository query already knows how to ask. A jMQ expression is written
+     * over the issue vocabulary — the same words the board filter uses — and is answered by the
+     * DATABASE, so paging and the count are real.
+     *
+     * <p>⚠️ It replaces nothing. {@code BoardFilterEvaluator} marks loaded cards over a rich object graph
+     * and stays exactly as it is; this answers <em>which issues, out of everything</em>. Where both a
+     * filter and the plain controls arrive, the expression wins and the controls are ignored — two
+     * narrowings silently intersecting is a result nobody can explain.
+     */
+    public IssueSearchResponse search(
+        Member caller,
+        String text,
+        String projectId,
+        String statusId,
+        String assigneeMemberId,
+        boolean openOnly,
+        boolean includeArchived,
+        String jmqFilter,
+        String jmqOrder,
+        int page,
+        int size
+    ) {
         List<String> browsableProjectIds = browsableProjects.idsFor(caller);
 
         int pageNumber = Math.max(page, 0);
@@ -90,6 +148,10 @@ public class IssueSearchService {
 
         if (browsableProjectIds.isEmpty()) {
             return new IssueSearchResponse(List.of(), pageNumber, pageSize, 0);
+        }
+
+        if (blankToNull(jmqFilter) != null || blankToNull(jmqOrder) != null) {
+            return matching(caller, projectId, includeArchived, jmqFilter, jmqOrder, pageNumber, pageSize);
         }
 
         // Most recently touched first: a search across everything is a search for what is going on,
@@ -117,6 +179,48 @@ public class IssueSearchService {
             .toList();
 
         return new IssueSearchResponse(items, pageNumber, pageSize, found.getTotalElements());
+    }
+
+    /**
+     * The jMQ path: the database says which issues and in what order, and this loads them.
+     *
+     * <p>⚠️ Re-ordered to the identifier list. {@code findAllById} returns rows in whatever order it
+     * finds them, so the sort somebody asked for would be quietly lost between the two queries — which is
+     * a list that looks sorted by nothing in particular rather than an error.
+     *
+     * <p>⚠️ Assembled through the same {@code issueAssembler} as the ordinary path. A second way to build
+     * a row would be a second place for an issue to look different.
+     */
+    private IssueSearchResponse matching(
+        Member caller,
+        String projectId,
+        boolean includeArchived,
+        String jmqFilter,
+        String jmqOrder,
+        int pageNumber,
+        int pageSize
+    ) {
+        QueryRunner.Matches matched = issueQueries.matching(
+            caller, blankToNull(projectId), includeArchived, jmqFilter, jmqOrder,
+            (long) pageNumber * pageSize, pageSize);
+
+        Map<String, Issue> found = issueRepository.findAllById(matched.identifiers()).stream()
+            .collect(Collectors.toMap(Issue::getId, issue -> issue));
+
+        List<Issue> issues = matched.identifiers().stream()
+            .map(found::get)
+            .filter(Objects::nonNull)
+            .toList();
+
+        Map<String, Project> projectsById = projectsOf(issues);
+        Map<String, String> projectIdByIssueId = issues.stream()
+            .collect(Collectors.toMap(Issue::getId, Issue::getProjectId));
+
+        List<IssueSearchResponse.Item> items = issueAssembler.rows(issues).stream()
+            .map(row -> toItem(row, projectsById.get(projectIdByIssueId.get(row.id()))))
+            .toList();
+
+        return new IssueSearchResponse(items, pageNumber, pageSize, matched.total());
     }
 
     private IssueSearchResponse.Item toItem(IssueRowResponse row, Project project) {
