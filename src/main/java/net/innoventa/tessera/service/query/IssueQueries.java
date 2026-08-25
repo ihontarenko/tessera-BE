@@ -6,7 +6,9 @@ import net.innoventa.tessera.service.BrowsableProjects;
 import org.jmouse.jdbc.dialect.Dialect;
 import org.jmouse.query.sql.Fragment;
 import org.jmouse.query.sql.QueryTarget;
+import org.jmouse.query.spring.builder.QueryRequest;
 import org.jmouse.query.spring.builder.QueryRunner;
+import org.jmouse.query.spring.source.QuerySources;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
@@ -42,6 +44,8 @@ public class IssueQueries {
 
     private final QueryRunner       runner;
     private final BrowsableProjects browsableProjects;
+    private final QuerySources      sources;
+    private final IssueSubject      subject;
 
     /**
      * The issues this caller may see that satisfy a filter, in its order, for one page.
@@ -72,8 +76,13 @@ public class IssueQueries {
             return new QueryRunner.Matches(List.of(), 0);
         }
 
+        // ⚠️ RESOLVED, never `IssueSchema.source()` directly. Once a declaration can be taken over there
+        // are two candidates for what `issues` means, and if this ran the shipped one while the screen
+        // showed the stored one, the screen would be a lie — the most convincing kind, because both
+        // halves are real. One place decides, and this is a caller of it rather than a second opinion.
         return runner.matching(
-                IssueSchema.source(),
+                sources.resolve(subject, new QueryRequest(subject.name(), caller.getId(), Map.of()))
+                        .orElseGet(IssueSchema::source),
                 within(projectId == null ? browsable : narrowed(browsable, projectId), includeArchived),
                 filter,
                 order,

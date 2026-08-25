@@ -13,8 +13,11 @@ import net.innoventa.tessera.repository.ResolutionRepository;
 import net.innoventa.tessera.repository.StatusRepository;
 import net.innoventa.tessera.exception.AccessDeniedException;
 import net.innoventa.tessera.security.access.AccessReason;
+import net.innoventa.tessera.security.access.InstallationAccess;
+import net.innoventa.tessera.security.Permissions;
 import org.jmouse.query.schema.QuerySchema;
 import org.jmouse.query.store.QueryOwner;
+import org.jmouse.query.store.SourceOrigin;
 import org.jmouse.query.spring.builder.QueryRequest;
 import org.jmouse.query.spring.builder.QuerySubject;
 import org.springframework.stereotype.Component;
@@ -53,6 +56,7 @@ public class IssueSubject implements QuerySubject {
     private final PriorityRepository   priorities;
     private final ResolutionRepository resolutions;
     private final CurrentMembers       members;
+    private final InstallationAccess   installationAccess;
 
     @Override
     public String name() {
@@ -78,6 +82,70 @@ public class IssueSubject implements QuerySubject {
     @Override
     public QuerySchema schema(QueryRequest request) {
         return IssueSchema.schema();
+    }
+
+    /**
+     * ⚠️ Fixed here — an issue is an issue, so the declaration is the same for every caller.
+     *
+     * <p>This is what the product <strong>ships</strong>, and it is the fallback rather than the answer:
+     * once somebody has taken the declaration over, the listing runs the stored one. Which of the two is
+     * in force is resolved in exactly one place — see {@link IssueQueries} — because a screen reading one
+     * and the engine running the other is the most convincing kind of lie, both halves being real.</p>
+     */
+    @Override
+    public Optional<org.jmouse.query.sql.QuerySource> source(QueryRequest request) {
+        return Optional.of(IssueSchema.source());
+    }
+
+    /**
+     * ⚠️ <strong>Authored</strong> — an issue mapping is a document over tables that do not move.
+     *
+     * <p>Unlike an entry listing, nothing about this shape is derived from data somebody entered: the
+     * columns are the columns, and changing what {@code issues} means is a deliberate act with a reason.
+     * Declaring it authored is what turns the two guards on — the permission below, and the installation's
+     * allow-list of publishable tables.</p>
+     */
+    @Override
+    public SourceOrigin origin() {
+        return SourceOrigin.AUTHORED;
+    }
+
+    /**
+     * ⚠️ Anybody signed in may READ the declaration, and that is a choice rather than an oversight.
+     *
+     * <p>It discloses the tables and columns behind the issue listing — more than the vocabulary, which
+     * is only what a query may say. In an installation where everybody already sees every board, every
+     * status and every issue type, the shape of the table those live in is not the secret; and a person
+     * writing a query against a mapping they cannot read is a person guessing.</p>
+     *
+     * <p>⚠️ It is written down here precisely because the default would have done the same thing
+     * silently. A product with tenants, or with a schema it treats as confidential, narrows this to a
+     * permission — and the seam exists so that is one method rather than a fork of the library.</p>
+     */
+    @Override
+    public void authorizeSourceRead(QueryRequest request) {
+        authorize(request);
+    }
+
+    /**
+     * ⚠️ Rewriting the declaration is <strong>not</strong> the permission that reads the listing.
+     *
+     * <p>Everybody signed in may write a query; almost nobody may change what the query is asked <em>of</em>.
+     * A mapping names tables, and the checks that confine a listing are about rows — none of them ask which
+     * table the rows came from. So this is the installation's configuration permission, held globally, and
+     * it is deliberately the same one that edits statuses and issue types: those decide what an issue can
+     * be, and this decides what an issue <em>is</em>.</p>
+     */
+    @Override
+    public void authorizeSourceWrite(QueryRequest request) {
+        Member caller = members.current();
+
+        if (caller == null || !installationAccess.permissionsOf(caller).contains(Permissions.ADMINISTER_CONFIGURATION)) {
+            throw new AccessDeniedException(
+                    AccessReason.NO_PERMISSION,
+                    "Rewriting what a listing IS needs " + Permissions.ADMINISTER_CONFIGURATION
+                    + ", installation-wide — it names the tables every query here reads.");
+        }
     }
 
     /**

@@ -5,6 +5,16 @@ spring:
   config:
     import: classpath:application-sensitive.yml
 
+  # ⚠️ This server answers in English, whatever the browser asks for — and that is a decision rather
+  # than a default. Spring resolves a request's locale from `Accept-Language` unless told otherwise,
+  # and Hibernate Validator ships translations of every built-in constraint message, so a browser
+  # configured for Ukrainian was answered "розмір має бути між 0 та 100" by a product that owns no
+  # Ukrainian copy anywhere and has no way to review it. `fixed` is what stops the language of an
+  # error being whoever's laptop produced it.
+  web:
+    locale: en
+    locale-resolver: fixed
+
   # MySQL is the no-flag default, the same shape every product in this workspace now uses. H2 used
   # to be the default here and is gone entirely: an H2 file running MODE=PostgreSQL made local dev
   # green against a dialect nothing is ever deployed on, so a MySQL-only failure was only ever
@@ -260,6 +270,27 @@ tessera:
       grace-period: ${TESSERA_FILE_SWEEPER_GRACE_PERIOD:24h}
 
 jmouse:
+  query:
+    # The tables an AUTHORED declaration may name — see `SourceOrigin` and `PublishedTables`.
+    #
+    # ⚠️ THIS LIST IS THE GUARD, and it is not ceremony either. A mapping names tables, and every check
+    # that confines a listing is about ROWS — none of them ask which table the rows came from, because
+    # until a declaration could be edited the answer was fixed at compile time. Without this list,
+    # somebody holding `configuration:administer` could point `issues` at `access_grants` and read it
+    # back through the ordinary, fully-authorized query API, with every check passing.
+    #
+    # ⚠️ EMPTY MEANS NOTHING IS ALLOWED. Deleting these lines does not widen what may be reached, it
+    # closes authoring entirely — which is the right direction for a guard to fail in.
+    #
+    # These five are exactly what the shipped declaration already reaches. Adding a table here is
+    # publishing it: anybody who may rewrite a declaration may then read every row of it.
+    published-tables:
+      - issues
+      - statuses
+      - issue_types
+      - priorities
+      - resolutions
+
   # POST /api/blocks/resolve — how another product's document draws a Tessera row.
   #
   # ⚠️ THE SWITCH IS NOT CEREMONY. The library mounts the route and gates nothing; what protects it is
