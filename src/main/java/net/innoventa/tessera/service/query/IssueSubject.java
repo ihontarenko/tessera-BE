@@ -14,6 +14,7 @@ import net.innoventa.tessera.repository.StatusRepository;
 import net.innoventa.tessera.exception.AccessDeniedException;
 import net.innoventa.tessera.security.access.AccessReason;
 import org.jmouse.query.schema.QuerySchema;
+import org.jmouse.query.store.QueryOwner;
 import org.jmouse.query.spring.builder.QueryRequest;
 import org.jmouse.query.spring.builder.QuerySubject;
 import org.springframework.stereotype.Component;
@@ -23,6 +24,7 @@ import java.util.Arrays;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
+import java.util.Optional;
 
 /**
  * Issues, as something a person may write a query about.
@@ -76,6 +78,25 @@ public class IssueSubject implements QuerySubject {
     @Override
     public QuerySchema schema(QueryRequest request) {
         return IssueSchema.schema();
+    }
+
+    /**
+     * ⚠️ A saved view here belongs to the MEMBER, across every project.
+     *
+     * <p>This listing's subject is "everything I can see", so a view filed under a project would be
+     * invisible from the screen that made it the moment somebody moved between projects — and a person
+     * with ten projects would keep ten separate shelves of the same question. The library's owner is a
+     * pair rather than an enum precisely so a product can answer this differently from its neighbour.</p>
+     *
+     * <p>Nobody signed in keeps nothing, rather than keeping something under a name that is not theirs.</p>
+     */
+    @Override
+    public Optional<SavedQueryHolder> holder(QueryRequest request) {
+        Member caller = members.current();
+
+        return caller == null
+                ? Optional.empty()
+                : Optional.of(new SavedQueryHolder(new QueryOwner("MEMBER", caller.getId()), caller.getId()));
     }
 
     /** So a query can say {@code issue.assignee == currentMember} — the board filter's own idiom. */
