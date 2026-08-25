@@ -169,6 +169,28 @@
             <version>${jmouse.version}</version>
         </dependency>
 
+        <!--
+          The saved-query store. ⚠️ ONE TABLE FOR EVERY PRODUCT, and naming it here is how this product
+          adopts it: the starter's store autoconfiguration is conditional on these classes, so a product
+          that wants only the builder never sees them.
+
+          A saved query names a SOURCE — `issues` — and what that reaches is resolved by this product's
+          own engine. So installations differ in what their sources mean, never in the shape of the rows,
+          which is why `saved_filters` here and `saved_views` in Innoventa were two implementations of
+          one thing.
+        -->
+        <dependency>
+            <groupId>org.jmouse</groupId>
+            <artifactId>jmouse-query-store</artifactId>
+            <version>${jmouse.version}</version>
+        </dependency>
+
+        <dependency>
+            <groupId>org.jmouse</groupId>
+            <artifactId>jmouse-query-store-jpa</artifactId>
+            <version>${jmouse.version}</version>
+        </dependency>
+
         <dependency>
             <groupId>org.jmouse</groupId>
             <artifactId>jmouse-access</artifactId>
