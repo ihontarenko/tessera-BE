@@ -41,8 +41,39 @@ public interface IssueRepository extends JpaRepository<Issue, String> {
      * filter can never become a way to see more (ADR-0008). Paged in the database rather than in memory:
      * "everything I can see" is the one query with no natural bound on its result.
      */
-    @Query("""
+    /*
+     * ⚠️ THE THREE JOINS ARE FOR ORDERING, NOT FOR FILTERING — nothing in the `where` mentions them.
+     *
+     * `issues` carries a priority, a type and a status as bare foreign keys, so `order by
+     * issue.priorityId` orders by an opaque identifier: alphabetical over UUIDs, which reads as no order
+     * at all. What "sort by priority" means is SEVERITY, and severity is `priorities.sequence` — a column
+     * on the other table. Hence an ad-hoc join per catalogue, and hence `IssueSortOrder`'s paths being
+     * `priority.sequence` / `type.hierarchyLevel` / `status.name`: those are these aliases.
+     *
+     * ⚠️ LEFT, not inner. Two of the three columns are `NOT NULL`, but an inner join would still make the
+     * search silently drop any issue whose catalogue row was deleted underneath it — a filter appearing
+     * where only an ordering was meant, which is the one thing a search must never do.
+     */
+    @Query(value = """
         select issue from Issue issue
+          left join Priority priority on priority.id = issue.priorityId
+          left join IssueType type on type.id = issue.issueTypeId
+          left join Status status on status.id = issue.statusId
+        where issue.projectId in :projectIds
+          and (:projectId is null or issue.projectId = :projectId)
+          and (:statusId is null or issue.statusId = :statusId)
+          and (:assigneeMemberId is null or issue.assigneeMemberId = :assigneeMemberId)
+          and (:openOnly = false or issue.resolutionId is null)
+          and (:includeArchived = true or issue.archivedAt is null)
+          and (:text is null or lower(issue.summary) like :text or lower(issue.issueKey) like :text)
+        """,
+        /*
+         * ⚠️ Spelled out, without the joins. A derived count would carry all three of them for a number
+         * that cannot depend on any — three extra scans per page of a search, on the one query that has
+         * no natural bound.
+         */
+        countQuery = """
+        select count(issue) from Issue issue
         where issue.projectId in :projectIds
           and (:projectId is null or issue.projectId = :projectId)
           and (:statusId is null or issue.statusId = :statusId)
@@ -117,6 +148,20 @@ public interface IssueRepository extends JpaRepository<Issue, String> {
      * render differently on the two databases.
      */
     List<Issue> findByIssueKeyIn(List<String> issueKeys);
+
+    /** The permanent identifier a stored reference carries — see {@code Issue.hash}. */
+    Optional<Issue> findByHash(String hash);
+
+    /**
+     * Many of them at once, for the same reason {@link #findByIssueKeyIn} exists.
+     *
+     * <p>⚠️ A document mixes the two forms freely — a key somebody typed beside a permanent id a picker
+     * inserted — so resolving one batch means asking both finders and merging, never choosing.
+     */
+    List<Issue> findByHashIn(List<String> hashes);
+
+    /** Whether a drawn hash is already taken; the probe that keeps minting from colliding. */
+    boolean existsByHash(String hash);
 
     List<Issue> findByParentIdOrderByRankAsc(String parentId);
 
@@ -213,17 +258,22 @@ public interface IssueRepository extends JpaRepository<Issue, String> {
     // any of it, which is exactly the thing project isolation is for.
 
     /**
-     * When each issue in these projects was raised, since a moment — the input to a per-day count.
+     * When each issue in these projects was raised, since a moment, and what it was estimated at.
      *
      * <p>⚠️ <strong>Timestamps rather than a grouped count, on purpose.</strong> Bucketing by day in
      * SQL means a date function, and MySQL and PostgreSQL do not spell those the same; this codebase
      * targets both. A week of one installation's issues is a short list, and Java can put a
      * {@code LocalDateTime} in the right bucket in a way that is the same on both dialects and can be
      * read without knowing which one is underneath.
+     *
+     * <p>⚠️ <strong>One query behind two charts.</strong> The flow chart counts these rows and the
+     * backlog-weight chart sums their estimates. See {@link IssueMoment} for why the estimate stays
+     * nullable all the way to the caller.
      */
-    @Query("select issue.createdAt from Issue issue "
+    @Query("select new net.innoventa.tessera.repository.IssueMoment(issue.createdAt, issue.storyPoints) "
+           + "from Issue issue "
            + "where issue.projectId in :projectIds and issue.createdAt >= :from")
-    List<LocalDateTime> createdAtSince(
+    List<IssueMoment> createdAtSince(
         @Param("projectIds") List<String> projectIds, @Param("from") LocalDateTime from);
 
     long countByProjectIdInAndResolvedAtGreaterThanEqual(List<String> projectIds, LocalDateTime from);
@@ -245,10 +295,21 @@ public interface IssueRepository extends JpaRepository<Issue, String> {
            + "group by issue.projectId, status.category")
     List<ProjectCategoryCount> countByProjectAndCategory(@Param("projectIds") List<String> projectIds);
 
-    /** When each issue in these projects was resolved, since a moment — the other half of the flow chart. */
-    @Query("select issue.resolvedAt from Issue issue "
+    /**
+     * When each issue in these projects was resolved, since a moment, and what it was estimated at.
+     *
+     * <p>⚠️ <strong>One query for two charts.</strong> The flow chart counts these rows — it is the
+     * other half of {@link #createdAtSince} — and the backlog-weight chart sums their estimates. Asking
+     * twice for the same population would be a second round trip that could return a different answer,
+     * since somebody may resolve something between the two.
+     *
+     * <p>⚠️ The estimate is nullable and stays that way to the caller: an issue nobody estimated is not
+     * an issue estimated at nothing, and {@link IssueMoment} explains what turns on the difference.
+     */
+    @Query("select new net.innoventa.tessera.repository.IssueMoment(issue.resolvedAt, issue.storyPoints) "
+           + "from Issue issue "
            + "where issue.projectId in :projectIds and issue.resolvedAt >= :from")
-    List<LocalDateTime> resolvedAtSince(
+    List<IssueMoment> resolvedAtSince(
         @Param("projectIds") List<String> projectIds, @Param("from") LocalDateTime from);
 
     /**

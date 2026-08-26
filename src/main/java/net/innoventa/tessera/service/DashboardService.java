@@ -2,6 +2,7 @@ package net.innoventa.tessera.service;
 
 import lombok.RequiredArgsConstructor;
 import net.innoventa.tessera.domain.Issue;
+import net.innoventa.tessera.domain.IssueType;
 import net.innoventa.tessera.domain.Member;
 import net.innoventa.tessera.domain.Status;
 import net.innoventa.tessera.domain.StatusCategory;
@@ -12,9 +13,13 @@ import net.innoventa.tessera.dto.dashboard.FlowPoint;
 import net.innoventa.tessera.dto.dashboard.ProjectProgress;
 import net.innoventa.tessera.dto.dashboard.StatusMovement;
 import net.innoventa.tessera.dto.dashboard.StatusStanding;
+import net.innoventa.tessera.dto.dashboard.TypeStanding;
+import net.innoventa.tessera.dto.dashboard.WeightPoint;
 import net.innoventa.tessera.repository.ActivityLogItemRepository;
 import net.innoventa.tessera.repository.IssueRepository;
 import net.innoventa.tessera.repository.LastStatusChange;
+import net.innoventa.tessera.repository.IssueMoment;
+import net.innoventa.tessera.repository.IssueTypeRepository;
 import net.innoventa.tessera.repository.ProjectCategoryCount;
 import net.innoventa.tessera.repository.StatusRepository;
 import net.innoventa.tessera.service.IssueBlockers.Blockage;
@@ -46,15 +51,20 @@ import java.util.stream.Collectors;
  * somebody who can see three projects that there are forty issues they cannot. A member on no project
  * gets zeros rather than an error, because "nothing to show" is a true and unremarkable state.
  *
- * <h2>⚠️ Five questions, kept apart</h2>
+ * <h2>⚠️ Six questions, kept apart</h2>
  *
- * <p><strong>Flow</strong> — raised against resolved — is the only one of the five that can say whether
- * the backlog is growing. <strong>Movement</strong> comes from the activity log and counts moves rather
- * than issues. <strong>Standing</strong> counts issues where they sit right now, and is movement's
- * other half: the two carry the same shape, answer opposite questions, and cannot be read off one
- * another — a week of furious movement can end with the boards exactly as they started.
- * <strong>Ageing</strong> is how long an open issue has sat where it is, which is the question a board
- * is structurally unable to answer. <strong>Blocked</strong> is the engine's own definition, asked of
+ * <p><strong>Flow</strong> — raised against resolved — is the only one of the six that can say whether
+ * the backlog is growing. <strong>Weight</strong> asks it again in the team's estimate units rather
+ * than in issues, which is why it is beside the flow chart and never inside it: a count and a weight do
+ * not share an axis. The two can disagree, and the disagreement is the finding — twelve issues in and
+ * twelve out is a week that broke even by count and may have doubled the backlog by weight.
+ * <strong>Movement</strong> comes from the activity log and counts
+ * moves rather than issues. <strong>Standing</strong> counts issues where they sit right now, and is
+ * movement's other half: the two carry the same shape, answer opposite questions, and cannot be read
+ * off one another — a week of furious movement can end with the boards exactly as they started.
+ * <strong>By type</strong> counts the same open issues by what kind of work they are, which standing
+ * cannot show however it is arranged. <strong>Ageing</strong> is how long an open issue has sat where
+ * it is, which is the question a board is structurally unable to answer. <strong>Blocked</strong> is the engine's own definition, asked of
  * {@link IssueBlockers} rather than restated here.
  *
  * <p>Answering one and labelling it another is the easy mistake, and it produces charts that cannot
@@ -88,6 +98,7 @@ public class DashboardService {
     private final IssueRepository           issueRepository;
     private final ActivityLogItemRepository activityLogItemRepository;
     private final StatusRepository          statusRepository;
+    private final IssueTypeRepository       issueTypeRepository;
     private final IssueBlockers             issueBlockers;
     private final BrowsableProjects         browsableProjects;
     private final MemberService             memberService;
@@ -114,15 +125,24 @@ public class DashboardService {
         if (projectIds.isEmpty()) {
             return new DashboardSummary(
                 0, 0, 0, flow(List.of(), List.of(), first, today),
-                List.of(), List.of(), List.of(), List.of(), 0, List.of(), 0, days);
+                0, 0, 0, 0, weight(List.of(), List.of(), first, today),
+                List.of(), List.of(), List.of(), List.of(), List.of(), 0, List.of(), 0, days);
         }
 
         LocalDateTime windowOpened = first.atStartOfDay();
 
-        List<LocalDateTime> created  = issueRepository.createdAtSince(projectIds, windowOpened);
-        List<LocalDateTime> resolved = issueRepository.resolvedAtSince(projectIds, windowOpened);
-        List<Issue>         open     = issueRepository
+        List<Issue> open = issueRepository
             .findByProjectIdInAndResolutionIdIsNullAndArchivedAtIsNull(projectIds);
+
+        // ⚠️ Two reads behind four charts. Each side is asked for once and answers both the flow chart,
+        // which counts the rows, and the weight chart, which sums their estimates — asking the database
+        // separately per chart would be four round trips, and two of them could disagree with the other
+        // two if somebody raised or resolved something in between.
+        List<IssueMoment> created  = issueRepository.createdAtSince(projectIds, windowOpened);
+        List<IssueMoment> resolved = issueRepository.resolvedAtSince(projectIds, windowOpened);
+
+        List<LocalDateTime> createdAt  = created.stream().map(IssueMoment::at).toList();
+        List<LocalDateTime> resolvedAt = resolved.stream().map(IssueMoment::at).toList();
 
         // ⚠️ Read once and handed down. Three of the sections below need the catalogue — movement by
         // name, standing and ageing by id — and re-reading it per section is three round trips for a
@@ -134,12 +154,18 @@ public class DashboardService {
         List<BlockedIssue> blocked = blocked(open, now);
 
         return new DashboardSummary(
-            countOn(created, today),
+            countOn(createdAt, today),
             created.size(),
             resolved.size(),
-            flow(created, resolved, first, today),
+            flow(createdAt, resolvedAt, first, today),
+            countEstimated(created),
+            countEstimated(resolved),
+            pointsOn(created, today),
+            pointsOn(resolved, today),
+            weight(created, resolved, first, today),
             movement(catalogue, projectIds, windowOpened),
             standing(open, catalogue, byId),
+            byType(open),
             progress(projectIds),
             ageing(projectIds, open, byId, now),
             open.size(),
@@ -177,6 +203,69 @@ public class DashboardService {
 
     private long countOn(List<LocalDateTime> moments, LocalDate day) {
         return moments.stream().filter(moment -> moment.toLocalDate().equals(day)).count();
+    }
+
+    // ── Weight ────────────────────────────────────────────────────────────────
+
+    /**
+     * The same week as {@link #flow}, weighed instead of counted: estimate in against estimate out.
+     *
+     * <p>⚠️ <strong>Its own chart rather than a third bar on the flow, because points are not
+     * issues.</strong> Two counts share an axis and invite the comparison that is the flow chart's
+     * entire content; a weight on that axis invites a comparison that means nothing — "twelve raised,
+     * eight delivered" is not eight of the twelve.
+     *
+     * <p>⚠️ <strong>Both sides, because one side answers nothing.</strong> This was first built as
+     * delivered-only, accumulating across the window, and that shape was wrong in a way worth
+     * recording: <em>a cumulative line only ever goes up</em>. With no reference on the plot, a good
+     * week and a bad one differ by a slope nobody reads. Raised weight is the reference, and it is the
+     * right one — it is the only thing that says whether finishing 400 points was keeping up or falling
+     * behind.
+     *
+     * <p>⚠️ <strong>An unestimated issue contributes nothing, and that is under-reporting rather than a
+     * zero.</strong> It is the honest arithmetic — nobody said what the work was worth, so nothing can
+     * be added for it — but read alone the numbers say a quiet week happened when a busy unestimated
+     * one did. Hence the two {@code estimated…InWindow} counts beside them: the chart is obliged to say
+     * how much of the week it was actually able to weigh.
+     *
+     * <p>⚠️ <strong>Every day of the window, zeros included</strong>, for the same reason the flow
+     * series fills its quiet days — and here it also keeps the two sides aligned, since a day that only
+     * one of them saw would otherwise shift the other's bars onto the wrong date.
+     */
+    private List<WeightPoint> weight(
+        List<IssueMoment> created, List<IssueMoment> resolved, LocalDate first, LocalDate last) {
+
+        Map<LocalDate, Double> arriving = pointsPerDay(created);
+        Map<LocalDate, Double> leaving  = pointsPerDay(resolved);
+
+        List<WeightPoint> series = new ArrayList<>();
+
+        for (LocalDate day = first; !day.isAfter(last); day = day.plusDays(1)) {
+            series.add(new WeightPoint(
+                day, arriving.getOrDefault(day, 0.0), leaving.getOrDefault(day, 0.0)));
+        }
+
+        return series;
+    }
+
+    private Map<LocalDate, Double> pointsPerDay(List<IssueMoment> moments) {
+        return moments.stream()
+            .filter(IssueMoment::estimated)
+            .collect(Collectors.groupingBy(
+                moment -> moment.at().toLocalDate(),
+                Collectors.summingDouble(IssueMoment::storyPoints)));
+    }
+
+    private double pointsOn(List<IssueMoment> moments, LocalDate day) {
+        return moments.stream()
+            .filter(IssueMoment::estimated)
+            .filter(moment -> moment.at().toLocalDate().equals(day))
+            .mapToDouble(IssueMoment::storyPoints)
+            .sum();
+    }
+
+    private long countEstimated(List<IssueMoment> moments) {
+        return moments.stream().filter(IssueMoment::estimated).count();
     }
 
     // ── Movement ──────────────────────────────────────────────────────────────
@@ -259,6 +348,48 @@ public class DashboardService {
         return rows.values().stream()
             .sorted(Comparator.comparingLong(StatusStanding::count).reversed()
                 .thenComparing(StatusStanding::status))
+            .toList();
+    }
+
+    /**
+     * What the open work actually <em>is</em>, commonest kind first.
+     *
+     * <p>⚠️ <strong>Standing's other half, and a genuinely different question.</strong> Standing says
+     * where the open work sits; this says what it is made of. A hundred issues spread evenly across the
+     * statuses is one picture, and a hundred issues of which seventy are bugs is another — no
+     * arrangement of statuses can show the second.
+     *
+     * <p>⚠️ <strong>Counted from the issues already in hand.</strong> Same population as standing —
+     * unresolved and unarchived — so these sum to {@code openTotal} as well, and the two cards agree by
+     * construction rather than by a second query happening to run at the same moment.
+     *
+     * <p>⚠️ <strong>No zero rows, which is the opposite of standing's rule and for a reason.</strong>
+     * Statuses are the few a project moves work through, so an empty one is a fact ("nothing is in
+     * review"). The issue-type catalogue is global: it holds every kind any project ever configured, so
+     * zero-filling it prints a dozen rows for kinds this installation has never raised and buries the
+     * ones that mean something.
+     *
+     * <p>⚠️ <strong>A type the catalogue has lost is named by its identifier rather than skipped</strong>
+     * — same reasoning as everywhere else here: the issue is real, and a picture of the boards that
+     * quietly omits part of them is worse than no picture.
+     */
+    private List<TypeStanding> byType(List<Issue> open) {
+        Map<String, IssueType> byId = issueTypeRepository.findAll().stream()
+            .collect(Collectors.toMap(IssueType::getId, Function.identity()));
+
+        return open.stream()
+            .collect(Collectors.groupingBy(Issue::getIssueTypeId, Collectors.counting()))
+            .entrySet().stream()
+            .map(entry -> {
+                IssueType type = byId.get(entry.getKey());
+
+                return new TypeStanding(
+                    type == null ? entry.getKey() : type.getName(),
+                    type == null ? null : type.getIconKey(),
+                    entry.getValue());
+            })
+            .sorted(Comparator.comparingLong(TypeStanding::count).reversed()
+                .thenComparing(TypeStanding::type))
             .toList();
     }
 
