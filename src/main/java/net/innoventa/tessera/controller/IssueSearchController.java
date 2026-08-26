@@ -58,7 +58,7 @@ public class IssueSearchController {
         @AuthenticationPrincipal Jwt jwt,
         @Valid @RequestBody IssueReferenceRequest request
     ) {
-        return issueReferenceService.resolve(jwt, request.issueKeys());
+        return issueReferenceService.resolve(jwt, request.references());
     }
 
     @GetMapping("/api/issues/search")
@@ -72,11 +72,23 @@ public class IssueSearchController {
         @RequestParam(defaultValue = "false") boolean includeArchived,
         @RequestParam(name = "jmq:filter", required = false) String jmqFilter,
         @RequestParam(name = "jmq:order", required = false) String jmqOrder,
+        /**
+         * What to order by, from {@code IssueSortOrder}'s closed list — {@code key}, {@code summary},
+         * {@code type}, {@code status}, {@code priority}, {@code points}, {@code updated}.
+         *
+         * <p>⚠️ A name this build does not know falls back to the default rather than failing: a search
+         * refused over a query parameter helps nobody, and the answer is still a correct list of issues.
+         * ⚠️ And it is ignored when {@code jmq:order} is present — an expression carries its own ordering,
+         * and two of them competing is a list nobody can explain.
+         */
+        @RequestParam(required = false) String sort,
+        /** {@code asc} or {@code desc}; anything else, and the default for the field applies. */
+        @RequestParam(required = false) String direction,
         @RequestParam(defaultValue = "0") int page,
         @RequestParam(defaultValue = "25") int size
     ) {
         return issueSearchService.search(jwt, text, projectId, statusId, assigneeMemberId, openOnly,
-            includeArchived, jmqFilter, jmqOrder, page, size);
+            includeArchived, jmqFilter, jmqOrder, sort, direction, page, size);
     }
 
     /**

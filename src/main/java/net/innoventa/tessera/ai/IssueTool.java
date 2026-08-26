@@ -201,11 +201,19 @@ public class IssueTool implements ToolDefinition {
      *
      * <p>{@code availableTransitions} is the exception worth keeping, because it is the answer to the
      * question the next call is going to ask.
+     *
+     * <p>⚠️ <strong>{@code reference} is the second exception, and it is deliberately not a bare
+     * identifier.</strong> A reference stored outside this tracker has to carry the permanent hash
+     * rather than the key, or it breaks the day a key is re-minted — so the value has to be reachable.
+     * Handing out the hash on its own is exactly the mistake the paragraph above describes: it would be
+     * passed straight back as an {@code issueKey}. What is handed out is therefore the whole written
+     * form, {@code issue:<hash>}, which is a link destination and nothing a tool would accept.
      */
     private Map<String, Object> describeInFull(IssueResponse issue) {
         Map<String, Object> described = new LinkedHashMap<>();
 
         described.put("key",         issue.issueKey());
+        described.put("reference",   "issue:" + issue.hash());
         described.put("summary",     issue.summary());
         described.put("description", issue.description());
         described.put("status",      issue.status() == null ? null : issue.status().name());
@@ -313,9 +321,11 @@ public class IssueTool implements ToolDefinition {
 
         Map<String, Object> answer = new LinkedHashMap<>();
 
-        answer.put("created",  true);
-        answer.put("issueKey", created.issueKey());
-        answer.put("status",   created.status() == null ? null : created.status().name());
+        answer.put("created",   true);
+        answer.put("issueKey",  created.issueKey());
+        // The form to write into a page — see `describeInFull` for why it is not the bare hash.
+        answer.put("reference", "issue:" + created.hash());
+        answer.put("status",    created.status() == null ? null : created.status().name());
 
         return answer;
     }

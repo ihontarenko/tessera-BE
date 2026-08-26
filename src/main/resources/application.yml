@@ -340,7 +340,9 @@ jmouse:
       #
       # ⚠️ THREE FILES, NOTHING CHECKS THEM: this key, the Vite proxy entry, and
       # `UI/src/api/attachments.ts`'s client.
-      prefix: /jmouse-files/api
+      # ⚠️ NOT SET any more — the library composes `/jmouse/files/api`, and every product composes the
+      # same one (Ivan, 2026-08-25: «нехай всі бібліотечні будуть уніфіковані типу /jmouse/…»). A
+      # per-module override is what let three products agree only by luck.
       # ON since TSSR-0103, reversing what stood here — that an attachment hangs off its issue, that there
       # were no folders to arrange, and that no StorageDirectory this product could place meant the tree
       # routes would refuse every call in a way that reads as a broken route.
@@ -417,7 +419,8 @@ jmouse:
       # A request log has to be able to say "this handler is the library's" at a glance — the reason the
       # same controller ended up hand-written in three products is that nothing about its address ever
       # said where it came from.
-      prefix: /jmai/api
+      # ⚠️ NOT SET any more — the library composes `/jmouse/ai/api`, like every other library surface
+      # (Ivan, 2026-08-25). One `/jmouse` rule in the proxy now covers all of them at once.
 
     # ⚠️ These were numbers in Java until this product took the starter, and they were numbers in Java
     # only because nothing was binding them. A tracker's bulk operation is a handful of issues rather

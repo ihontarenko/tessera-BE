@@ -311,7 +311,7 @@ public class SecurityConfiguration {
      * <h3>⚠️ Registered on {@code /**}, and narrowed by the allow-list rather than by the path</h3>
      *
      * <p>The live-block route is the reason this exists, and confining the configuration to
-     * {@code /api/blocks/**} would read as tighter while being the same thing: an origin is either
+     * {@code /jmouse/blocks/api/**} would read as tighter while being the same thing: an origin is either
      * trusted with a signed token belonging to the person holding it, or it is not. Every route it could
      * then reach already asks what that person may see.
      *

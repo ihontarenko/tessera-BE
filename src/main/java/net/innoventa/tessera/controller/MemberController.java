@@ -137,7 +137,17 @@ public class MemberController {
         return memberAvatarService.clear(memberService.requireMember(memberId));
     }
 
-    /** The seed a generated face is drawn from — not a key into a catalogue, the generator is total. */
-    public record ChoosePresetRequest(@NotBlank @Size(max = 100) String preset) { }
+    /**
+     * What a generated face is drawn from — a descriptor, not a key into a catalogue.
+     *
+     * <p>⚠️ <strong>No length here, and that absence is the fix for a bug.</strong> This carried
+     * {@code @Size(max = 100)} back when the column held a bare seed; the column widened to 512 when the
+     * drawing engine started storing a descriptor, and this number did not follow. Every descriptor a
+     * picker produces is longer than a hundred characters, so the one screen that reaches this route —
+     * dressing somebody else's client — refused every face with "size must be between 0 and 100", in
+     * both products carrying this file. The bound belongs to {@code AvatarDescriptors}, which states it
+     * once, refuses with the number, and cannot drift from the column beside it.
+     */
+    public record ChoosePresetRequest(@NotBlank String preset) { }
 
 }

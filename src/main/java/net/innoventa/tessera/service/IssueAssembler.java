@@ -83,6 +83,7 @@ public class IssueAssembler {
         return new IssueRowResponse(
             issue.getId(),
             issue.getIssueKey(),
+            issue.getHash(),
             issue.getSequence(),
             issue.getSummary(),
             IssueTypeSummary.from(catalogs.types.get(issue.getIssueTypeId())),
@@ -145,6 +146,7 @@ public class IssueAssembler {
             issue.getId(),
             issue.getProjectId(),
             issue.getIssueKey(),
+            issue.getHash(),
             issue.getSequence(),
             issue.getSummary(),
             issue.getDescription(),

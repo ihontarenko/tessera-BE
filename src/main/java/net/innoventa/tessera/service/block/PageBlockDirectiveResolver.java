@@ -4,12 +4,15 @@ import net.innoventa.tessera.domain.Member;
 import net.innoventa.tessera.dto.block.BlockStatus;
 import net.innoventa.tessera.dto.block.PageBlockView;
 import net.innoventa.tessera.service.block.spi.BlockRequest;
+import net.innoventa.tessera.service.block.spi.BlockSuggestRequest;
 import net.innoventa.tessera.service.block.spi.PageBlockResolver;
 import org.jmouse.liveblocks.Directive;
 import org.jmouse.liveblocks.DirectiveResolver;
 import org.jmouse.liveblocks.DirectiveStatus;
+import org.jmouse.liveblocks.DirectiveSuggestion;
 import org.jmouse.liveblocks.ResolvedDirective;
 
+import java.util.List;
 import java.util.function.Supplier;
 
 /**
@@ -68,6 +71,36 @@ public class PageBlockDirectiveResolver implements DirectiveResolver {
         return resolver.directive();
     }
 
+    /**
+     * What another product's picker may offer from this one.
+     *
+     * <p>⚠️ <strong>Nobody reading is an empty list, not a refusal.</strong> A picker asks every
+     * namespace its installation knows and draws a tab per answer; a 401 there would put an error in a
+     * dialog somebody opened to write a sentence. The same reasoning as a block on a page read without
+     * an account, and the same outcome.
+     *
+     * <p>The absolute address is composed here for the reason a resolved block's is: a resolver knows
+     * where a thing lives inside this product, and which host a browser reaches this product at is a
+     * deployment fact it has no business holding.
+     */
+    @Override
+    public List<DirectiveSuggestion> suggest(String query, int limit) {
+        Member reader = caller.get();
+
+        if (reader == null) {
+            return List.of();
+        }
+
+        return resolver.suggest(new BlockSuggestRequest(query, limit, reader)).stream()
+                .map(suggestion -> new DirectiveSuggestion(
+                        suggestion.reference(),
+                        suggestion.label(),
+                        suggestion.title(),
+                        suggestion.subtitle(),
+                        browserUrl + suggestion.path()))
+                .toList();
+    }
+
     @Override
     public ResolvedDirective resolve(Directive directive) {
         Member reader = caller.get();
@@ -120,6 +153,13 @@ public class PageBlockDirectiveResolver implements DirectiveResolver {
      * {@code ·} because that is what the consumer renders as one grey line. Blank parts are dropped
      * rather than rendered as gaps: a block that reads {@code TSSR-4 ·  · 8 points} looks like a bug in
      * the product being quoted.
+     *
+     * <p>⚠️ <strong>Only an issue gets a label, and the other two go without one on purpose.</strong> A
+     * label is what a badge drawn inside a sentence prints, so it has to be the name the thing is
+     * actually known by — an issue has one and it is the key. A sprint and a board do not: the shortest
+     * true name either has is its project's key, and a badge in the middle of a paragraph reading
+     * {@code TSSR} where a sprint was meant says less than the words the writer chose. Null lets the
+     * document's own text stand.
      */
     private ResolvedDirective present(Directive directive, PageBlockView answer) {
         if (answer.issue() != null) {
@@ -127,6 +167,10 @@ public class PageBlockDirectiveResolver implements DirectiveResolver {
 
             return ResolvedDirective.resolved(
                     directive,
+                    // ⚠️ The key as it stands NOW, not the argument that was asked for. A reference
+                    // written against the permanent hash has to print the current key, or the whole
+                    // point of writing it that way is lost.
+                    issue.issueKey(),
                     issue.summary(),
                     line(issue.issueKey(), issue.typeName(), issue.statusName(),
                          points(issue.storyPoints()), issue.assigneeName()),

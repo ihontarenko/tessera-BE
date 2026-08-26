@@ -8,6 +8,8 @@ import org.jmouse.access.AccessDecision;
 import org.jmouse.access.AccessTarget;
 import org.jmouse.access.EffectivePermissions;
 import org.jmouse.access.EffectivePermissionsResolver;
+import org.jmouse.access.PermissionProvenance;
+import org.jmouse.access.RefusalWords;
 import org.jmouse.access.Subject;
 import org.jmouse.access.axis.AccessAxisEvaluator;
 import org.springframework.beans.factory.ObjectProvider;
@@ -63,12 +65,37 @@ public class PermissionAxis implements AccessAxisEvaluator {
             return AccessDecision.allowed();
         }
 
-        return outsideTheProject(effective, target)
-                ? AccessDecision.refused(AccessReason.NOT_FOUND_OR_HIDDEN, "Project not found.")
-                : AccessDecision.refused(
-                        AccessReason.NO_PERMISSION,
-                        "You do not have permission to do this (" + permission + "). Somebody who "
-                        + "administers this project has to give it to you.");
+        // ⚠️ THE EXPLANATION IS DELIBERATELY NOT ATTACHED TO THE "NOT FOUND" BRANCH. A sentence a rule
+        // wrote about this project is a sentence that says the project exists — which is exactly what
+        // the short answer is protecting (ADR-0002). A `reason "…"` is written for a reader who already
+        // knows where they are.
+        if (outsideTheProject(effective, target)) {
+            return AccessDecision.refused(AccessReason.NOT_FOUND_OR_HIDDEN, "Project not found.");
+        }
+
+        PermissionProvenance provenance  = effective.provenanceOf(permission);
+        String               explanation = provenance == null ? null : provenance.explanation();
+
+        return AccessDecision.refused(
+                AccessReason.NO_PERMISSION,
+                RefusalWords.explained(missing(provenance, permission), explanation),
+                explanation);
+    }
+
+    /**
+     * Which of the two "no" sentences this is.
+     *
+     * <p>⚠️ A permission taken away and a permission never given need different advice. "Somebody who
+     * administers this project has to give it to you" is true where nothing ever routed the permission
+     * here — and false where a {@code deny} removed it, because deny wins last and being granted it
+     * again changes nothing.
+     */
+    private String missing(PermissionProvenance provenance, String permission) {
+        return provenance != null && provenance.wasRemoved()
+                ? "This is withheld here (" + permission + "). It was taken away on purpose, so being "
+                  + "granted it again will not lift it."
+                : "You do not have permission to do this (" + permission + "). Somebody who "
+                  + "administers this project has to give it to you.";
     }
 
     /**

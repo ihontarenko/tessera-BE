@@ -45,4 +45,21 @@ public interface PageBlockResolver {
      */
     PageBlockView resolve(BlockRequest request);
 
+    /**
+     * What a document could refer to — the question a picker asks before anything has been named.
+     *
+     * <p>⚠️ <strong>Empty is a complete answer.</strong> A resolver whose things are written from a
+     * number somebody already has in front of them has nothing worth browsing, and offering a list of
+     * everything would help nobody. The default keeps every resolver written before this compiling.
+     *
+     * <p>⚠️ <strong>Narrow to the caller, harder than {@link #resolve} does.</strong> A resolver leaks
+     * only to somebody who already guessed an identifier; a suggester that leaks hands over the list.
+     * What comes back is what this person could already find in this product's own screens.
+     *
+     * @param request who is asking, and what they have typed so far — blank means "the first few"
+     */
+    default java.util.List<BlockSuggestion> suggest(BlockSuggestRequest request) {
+        return java.util.List.of();
+    }
+
 }

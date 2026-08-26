@@ -13,6 +13,14 @@ import java.time.LocalDateTime;
 public record IssueRowResponse(
     String id,
     String issueKey,
+    /**
+     * The permanent identifier — see {@code Issue.hash}.
+     *
+     * ⚠️ On a <em>row</em> because a row is where somebody decides to quote something: a picker offering
+     * issues and a list offering "copy reference" both need it, and a second request per row to fetch
+     * six characters is the kind of thing that turns a list into a waterfall.
+     */
+    String hash,
     int sequence,
     String summary,
     IssueTypeSummary type,

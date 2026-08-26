@@ -65,7 +65,7 @@ public class IssueSearchService {
         int size
     ) {
         return search(jwt, text, projectId, statusId, assigneeMemberId, openOnly, includeArchived,
-            null, null, page, size);
+            null, null, null, null, page, size);
     }
 
     /**
@@ -85,11 +85,13 @@ public class IssueSearchService {
         boolean includeArchived,
         String jmqFilter,
         String jmqOrder,
+        String sort,
+        String direction,
         int page,
         int size
     ) {
         return search(memberService.resolveMember(jwt), text, projectId, statusId, assigneeMemberId,
-            openOnly, includeArchived, jmqFilter, jmqOrder, page, size);
+            openOnly, includeArchived, jmqFilter, jmqOrder, sort, direction, page, size);
     }
 
     /**
@@ -112,7 +114,7 @@ public class IssueSearchService {
         int size
     ) {
         return search(caller, text, projectId, statusId, assigneeMemberId, openOnly, includeArchived,
-            null, null, page, size);
+            null, null, null, null, page, size);
     }
 
     /**
@@ -138,6 +140,8 @@ public class IssueSearchService {
         boolean includeArchived,
         String jmqFilter,
         String jmqOrder,
+        String sort,
+        String direction,
         int page,
         int size
     ) {
@@ -154,8 +158,12 @@ public class IssueSearchService {
             return matching(caller, projectId, includeArchived, jmqFilter, jmqOrder, pageNumber, pageSize);
         }
 
-        // Most recently touched first: a search across everything is a search for what is going on,
-        // and rank only orders a board within one project.
+        // Most recently touched first unless somebody asked otherwise: a search across everything is a
+        // search for what is going on, and rank only orders a board within one project.
+        //
+        // ⚠️ A `sort` this build does not recognise falls back to that default rather than failing — see
+        // `IssueSortOrder`. And it never reaches the jMQ branch above: an expression carries its own
+        // ordering, and two orderings quietly competing is a list nobody can explain.
         Page<Issue> found = issueRepository.search(
             browsableProjectIds,
             blankToNull(projectId),
@@ -164,7 +172,7 @@ public class IssueSearchService {
             openOnly,
             includeArchived,
             likePattern(text),
-            PageRequest.of(pageNumber, pageSize, Sort.by(Sort.Direction.DESC, "updatedAt"))
+            PageRequest.of(pageNumber, pageSize, IssueSortOrder.resolve(sort, direction))
         );
 
         List<Issue> issues = found.getContent();
