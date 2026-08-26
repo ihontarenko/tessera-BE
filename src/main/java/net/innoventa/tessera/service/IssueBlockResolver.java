@@ -9,6 +9,10 @@ import net.innoventa.tessera.domain.Resolution;
 import net.innoventa.tessera.domain.Status;
 import net.innoventa.tessera.dto.block.BlockStatus;
 import net.innoventa.tessera.dto.block.PageBlockView;
+import net.innoventa.tessera.dto.issue.IssueRowResponse;
+import net.innoventa.tessera.dto.issue.IssueSearchResponse;
+import net.innoventa.tessera.dto.issue.IssueTypeSummary;
+import net.innoventa.tessera.dto.issue.StatusSummary;
 import net.innoventa.tessera.repository.IssueRepository;
 import net.innoventa.tessera.repository.IssueTypeRepository;
 import net.innoventa.tessera.repository.MemberRepository;
@@ -18,11 +22,15 @@ import net.innoventa.tessera.repository.StatusRepository;
 import net.innoventa.tessera.security.Permissions;
 import net.innoventa.tessera.security.access.ProjectAccess;
 import net.innoventa.tessera.service.block.spi.BlockRequest;
+import net.innoventa.tessera.service.block.spi.BlockSuggestRequest;
+import net.innoventa.tessera.service.block.spi.BlockSuggestion;
 import net.innoventa.tessera.service.block.spi.PageBlockResolver;
 import org.springframework.stereotype.Component;
 
+import java.util.List;
 import java.util.Locale;
 import java.util.Optional;
+import java.util.stream.Stream;
 
 /**
  * {@code :::issue TSSR-4} — one issue, as it stands right now (TSSR-18).
@@ -33,6 +41,11 @@ import java.util.Optional;
  * <p>⚠️ <strong>It lives here, beside the issues, and not in the wiki.</strong> The block engine has no
  * idea what an issue is and must not learn — that is the whole point of the SPI, and it is what lets
  * TSSR-19 move pages to WiQi while this class stays exactly where it is.
+ *
+ * <p>⚠️ <strong>The argument is a key or a permanent hash</strong>, and the writer does not have to say
+ * which. A key is what somebody types into a page; a hash is what a picker inserts and what goes on
+ * resolving after the key has been re-minted. See {@link #byKeyOrHash} for why the order of the two
+ * lookups is not arbitrary.
  *
  * <p>⚠️ <strong>An issue the reader may not see is a miss, indistinguishable from one that does not
  * exist.</strong> Issue keys are guessable — {@code TSSR-1} through {@code TSSR-n} — so a resolver that
@@ -51,6 +64,7 @@ public class IssueBlockResolver implements PageBlockResolver {
     private final ResolutionRepository resolutionRepository;
     private final MemberRepository memberRepository;
     private final ProjectAccess projectAccess;
+    private final IssueSearchService issueSearchService;
 
     @Override
     public String directive() {
@@ -60,10 +74,7 @@ public class IssueBlockResolver implements PageBlockResolver {
     @Override
     public PageBlockView resolve(BlockRequest request) {
         String argument = request.argument();
-
-        // Keys are stored uppercase and somebody writing prose may not have been. Normalised here rather
-        // than left to a collation, which MySQL and PostgreSQL would decide differently.
-        Issue issue = issueRepository.findByIssueKey(argument.toUpperCase(Locale.ROOT)).orElse(null);
+        Issue  issue    = byKeyOrHash(argument);
 
         if (issue == null || !visible(request.caller(), issue)) {
             return PageBlockView.miss(directive(), argument, BlockStatus.NOT_FOUND);
@@ -87,6 +98,72 @@ public class IssueBlockResolver implements PageBlockResolver {
             issue.getResolutionId() == null
                 ? null
                 : nameOf(resolutionRepository.findById(issue.getResolutionId()).map(Resolution::getName))));
+    }
+
+    /**
+     * The issues somebody could refer to — what the link dialog's Issues tab is a view of.
+     *
+     * <p>⚠️ <strong>The search decides visibility, and nothing here re-decides it.</strong>
+     * {@code IssueSearchService} already runs over the projects this member may browse and never
+     * widens; a second filter added at this layer would be a second thing to keep in step, and the day
+     * they disagreed one of them would be wrong about who may see what.
+     *
+     * <p>⚠️ <strong>Open work first, and archived work not at all.</strong> A reference is written while
+     * somebody is describing work in flight — a picker whose first page is last year's closed tickets is
+     * a picker people stop opening.
+     *
+     * <p>⚠️ And the reference carries the <strong>hash</strong>. A picker that inserted the key would
+     * write the fragile form on every use, which is the one thing this whole path exists to stop.
+     */
+    @Override
+    public List<BlockSuggestion> suggest(BlockSuggestRequest request) {
+        IssueSearchResponse found = issueSearchService.search(
+            request.caller(),
+            request.isBrowsing() ? null : request.query(),
+            null,
+            null,
+            null,
+            true,
+            false,
+            0,
+            request.limit());
+
+        return found.items().stream().map(item -> describe(item.issue())).toList();
+    }
+
+    private BlockSuggestion describe(IssueRowResponse issue) {
+        return new BlockSuggestion(
+            "issue:" + issue.hash(),
+            issue.issueKey(),
+            issue.summary(),
+            line(nameOf(Optional.ofNullable(issue.type()).map(IssueTypeSummary::name)),
+                 nameOf(Optional.ofNullable(issue.status()).map(StatusSummary::name))),
+            "/issues/" + issue.issueKey());
+    }
+
+    /** The state line, blanks dropped — a suggestion reading {@code Bug ·  } looks like a defect. */
+    private static String line(String... parts) {
+        return Stream.of(parts).filter(part -> part != null && !part.isBlank())
+                .reduce((left, right) -> left + " · " + right)
+                .orElse(null);
+    }
+
+    /**
+     * The issue an argument names, whichever of the two forms it is written in.
+     *
+     * <p>⚠️ <strong>Key first, hash second, and the order is load-bearing.</strong> Six hex characters
+     * is also a perfectly ordinary issue key to anything that only looks at shape, so asking the hash
+     * first would let a hash-shaped key shadow the issue whose hash that is. A key is what people write;
+     * a hash is what a stored link carries.
+     *
+     * <p>Case is applied per lookup rather than once: keys are stored uppercase and hashes lowercase,
+     * and leaving either to a collation is how the same page comes to render differently on MySQL and
+     * on PostgreSQL.
+     */
+    private Issue byKeyOrHash(String argument) {
+        return issueRepository.findByIssueKey(argument.toUpperCase(Locale.ROOT))
+                .or(() -> issueRepository.findByHash(argument.toLowerCase(Locale.ROOT)))
+                .orElse(null);
     }
 
     private boolean visible(Member caller, Issue issue) {

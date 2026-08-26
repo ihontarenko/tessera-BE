@@ -60,6 +60,7 @@ public class IssueService {
     private final RankService rankService;
     private final CallingAgent callingAgent;
     private final IssueKeyAllocator issueKeyAllocator;
+    private final IssueHashes       issueHashes;
     private final IssueHierarchyService issueHierarchyService;
     private final ActivityLogService activityLogService;
     private final IssueCatalog issueCatalog;
@@ -101,6 +102,8 @@ public class IssueService {
             .projectId(projectId)
             .sequence(allocation.sequence())
             .issueKey(allocation.issueKey())
+            // Drawn once here and never again, which is what makes a stored reference outlive the key.
+            .hash(issueHashes.draw())
             .summary(request.summary())
             .description(request.description())
             .issueTypeId(request.issueTypeId())

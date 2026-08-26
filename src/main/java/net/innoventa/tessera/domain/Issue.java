@@ -22,6 +22,7 @@ import java.time.LocalDateTime;
     name = "issues",
     uniqueConstraints = {
         @UniqueConstraint(name = "uq_issues_key", columnNames = "issue_key"),
+        @UniqueConstraint(name = "uq_issues_hash", columnNames = "hash"),
         @UniqueConstraint(name = "uq_issues_project_sequence", columnNames = {"project_id", "sequence"})
     }
 )
@@ -43,6 +44,16 @@ public class Issue {
      */
     public static final int MAXIMUM_DESCRIPTION_LENGTH = 16_000;
 
+    /**
+     * How many characters {@link #hash} is drawn with.
+     *
+     * <p>Six hex characters is about 16.7 million, which is a collision every few thousand issues rather
+     * than every few — and minting probes the table anyway, so the number bounds how often it has to
+     * draw twice, not whether a collision can happen. The column is {@code length 16} so this can grow
+     * without a migration.
+     */
+    public static final int HASH_LENGTH = 6;
+
     @Id
     @Column(length = 36, nullable = false)
     private String id;
@@ -57,6 +68,25 @@ public class Issue {
     /** What everything references, e.g. {@code TIC-1}. Unique instance-wide, denormalised from strategy. */
     @Column(name = "issue_key", nullable = false, length = 64)
     private String issueKey;
+
+    /**
+     * The one identifier of this issue that nothing changes — six characters, drawn once at creation.
+     *
+     * <p>⚠️ <strong>The key is not this, and that is the whole reason this column exists.</strong> A key
+     * is a project's key plus a counter: readable, quotable, and re-mintable. A reference stored
+     * anywhere outside this database — in a wiki page, in another product's description — that carries
+     * the key carries the half that can move, and breaks the day somebody re-mints one.
+     *
+     * <p>⚠️ <strong>Not updatable, and the annotation is the cheapest place to say so.</strong> A
+     * {@code setHash} anything could reach is every stored reference eventually resolving to nothing,
+     * discovered one page at a time months later.
+     *
+     * <p>⚠️ <strong>Resolved second, never first.</strong> Six hex characters is also a perfectly
+     * ordinary issue key to a matcher that only looks at shape, so anything accepting either asks the
+     * key first: a key is what people write, a hash is what a link carries.
+     */
+    @Column(name = "hash", nullable = false, length = 16, updatable = false)
+    private String hash;
 
     @Column(nullable = false, length = 255)
     private String summary;
