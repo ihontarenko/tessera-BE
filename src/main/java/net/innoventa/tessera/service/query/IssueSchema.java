@@ -95,6 +95,13 @@ public final class IssueSchema {
             new QueryAttribute("issue.points", "story_points", QueryType.NUMBER, COLUMN),
             new QueryAttribute("issue.parent", "parent_id", QueryType.TEXT, COLUMN),
 
+            // The schedule. ⚠️ TEMPORAL like the timestamps beside them, though these are DATE columns:
+            // a query says `issue.deadline <= today` either way, and the type here decides which
+            // comparisons the grammar offers rather than what the column holds.
+            new QueryAttribute("issue.queuedFor", "queued_for", QueryType.TEMPORAL, COLUMN),
+            new QueryAttribute("issue.redLine", "red_line", QueryType.TEMPORAL, COLUMN),
+            new QueryAttribute("issue.deadline", "deadline", QueryType.TEMPORAL, COLUMN),
+
             new QueryAttribute("issue.createdAt", "created_at", QueryType.TEMPORAL, COLUMN),
             new QueryAttribute("issue.updatedAt", "updated_at", QueryType.TEMPORAL, COLUMN),
             new QueryAttribute("issue.resolvedAt", "resolved_at", QueryType.TEMPORAL, COLUMN),

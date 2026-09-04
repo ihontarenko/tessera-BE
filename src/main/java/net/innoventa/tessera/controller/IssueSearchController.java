@@ -3,11 +3,13 @@ package net.innoventa.tessera.controller;
 import jakarta.validation.Valid;
 import lombok.RequiredArgsConstructor;
 import net.innoventa.tessera.dto.issue.IssueReferenceRequest;
+import net.innoventa.tessera.dto.issue.IssueMatch;
 import net.innoventa.tessera.dto.issue.IssueReferenceView;
 import net.innoventa.tessera.dto.issue.IssueRegisterResponse;
 import net.innoventa.tessera.dto.issue.IssueSearchResponse;
 import net.innoventa.tessera.service.IssueReferenceService;
 import net.innoventa.tessera.service.IssueRegisterService;
+import net.innoventa.tessera.service.IssueRelevanceSearch;
 import net.innoventa.tessera.service.IssueSearchService;
 import org.jmouse.access.enforcement.RequiresAccess;
 import org.springframework.security.core.annotation.AuthenticationPrincipal;
@@ -37,6 +39,7 @@ import java.util.List;
 public class IssueSearchController {
 
     private final IssueSearchService    issueSearchService;
+    private final IssueRelevanceSearch  issueRelevanceSearch;
     private final IssueRegisterService  issueRegisterService;
     private final IssueReferenceService issueReferenceService;
 
@@ -89,6 +92,32 @@ public class IssueSearchController {
     ) {
         return issueSearchService.search(jwt, text, projectId, statusId, assigneeMemberId, openOnly,
             includeArchived, jmqFilter, jmqOrder, sort, direction, page, size);
+    }
+
+    /**
+     * The other search: <em>where did we write that down</em> (TSSR-156).
+     *
+     * <p>⚠️ <strong>A second route rather than a mode of the one above, and that is deliberate.</strong>
+     * {@link #search} is a filtered table — a project, a status, an assignee, an explicit sort column,
+     * paging in the database. This is ranked by relevance over the summary, the key, the description
+     * <em>and the comments</em>, cut to a limit, with the passage that matched on every row. The two are
+     * incompatible in their mechanics as well as their intent: relevance ordering cannot coexist with
+     * "sort by priority", and ranking in Java cannot coexist with paging in SQL.
+     *
+     * <p>Bare {@code @RequiresAccess} for the same reason its neighbours carry one: the request is not
+     * <em>about</em> a project, so there is no place to be refused at, and what confines the answer is
+     * the filtering — {@code BrowsableProjects}, asked before either query rather than after both.
+     */
+    @GetMapping("/api/issues/find")
+    public List<IssueMatch> find(
+        @AuthenticationPrincipal Jwt jwt,
+        @RequestParam(required = false) String query,
+        /** ⚠️ Narrowing only — a project this caller cannot browse answers empty, never its contents. */
+        @RequestParam(required = false) String project,
+        @RequestParam(defaultValue = "0") int limit
+    ) {
+        return issueRelevanceSearch.find(
+            jwt, query, project, limit > 0 ? limit : IssueRelevanceSearch.DEFAULT_RESULTS);
     }
 
     /**

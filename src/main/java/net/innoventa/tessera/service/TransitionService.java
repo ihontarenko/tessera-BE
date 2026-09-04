@@ -46,6 +46,7 @@ public class TransitionService {
     private final ActivityLogService activityLogService;
     private final IssueCatalog issueCatalog;
     private final IssueArchiveService issueArchiveService;
+    private final IssueScheduleService issueScheduleService;
     private final IssueAssembler issueAssembler;
     private final IssueBlockers issueBlockers;
 
@@ -93,6 +94,17 @@ public class TransitionService {
         // out — the same axis as resolution, driven by the target category, never a free field. Powers
         // the board's done-threshold hiding accurately, unlike updatedAt which any later edit resets.
         issue.setResolvedAt(target.getCategory() == StatusCategory.DONE ? LocalDateTime.now() : null);
+
+        // ⚠️ Finishing an issue answers "when do I pick this up", so the queue date goes with it. Nothing
+        // is picked up twice, and a queue date left on completed work is noise on every listing that
+        // reads one — including the "what is up next" answer the whole field exists to give.
+        //
+        // ⚠️ The red line and the deadline deliberately STAY. Those are commitments rather than plans:
+        // what the deadline was is worth reading beside when the work actually landed, and clearing it
+        // here would delete the only evidence of whether it was met.
+        if (target.getCategory() == StatusCategory.DONE) {
+            issueScheduleService.clearQueue(issue);
+        }
 
         // ⚠️ Reopening takes the issue back out of the archive (TSSR-4). Archived work is finished work
         // that has been put away, so an issue that is open again cannot stay put away — it would be open

@@ -1,6 +1,7 @@
 package net.innoventa.tessera.dto.board;
 
 import net.innoventa.tessera.dto.MemberSummary;
+import net.innoventa.tessera.dto.issue.IssueScheduleView;
 import net.innoventa.tessera.dto.issue.IssueTypeSummary;
 import net.innoventa.tessera.dto.issue.PrioritySummary;
 import net.innoventa.tessera.dto.issue.StatusSummary;
@@ -43,6 +44,18 @@ public record BoardCardView(
      * a query per card for something nobody reads at this size.
      */
     boolean blocked,
+    /**
+     * When the issue is meant to happen, and how pressing that is today.
+     *
+     * ⚠️ <strong>On a card, unlike {@code blockedBy}, and for the opposite reason.</strong> A blocker is
+     * a list of other issues and costs a query per card, so the card carries a flag and the keys stay one
+     * click away. A schedule is three columns already loaded with the row and a verdict derived from
+     * them, so it costs nothing — and the board is precisely the screen where "what is due" decides what
+     * somebody drags next.
+     *
+     * ⚠️ Never null: an unscheduled card carries the empty schedule rather than nothing.
+     */
+    IssueScheduleView schedule,
     LocalDateTime resolvedAt
 ) {
 }

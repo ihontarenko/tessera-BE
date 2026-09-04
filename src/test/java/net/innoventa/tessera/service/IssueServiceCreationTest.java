@@ -67,11 +67,19 @@ class IssueServiceCreationTest {
     @Mock private MemberService memberService;
     @Mock private WorkflowResolver workflowResolver;
     @Mock private RankService rankService;
+    @Mock private RankRebalanceService rankRebalanceService;
     @Mock private IssueKeyAllocator issueKeyAllocator;
     @Mock private IssueHierarchyService issueHierarchyService;
     @Mock private ActivityLogService activityLogService;
     @Mock private IssueCatalog issueCatalog;
     @Mock private IssueAssembler issueAssembler;
+    /*
+     * ⚠️ Added because IssueService grew it and this fixture did not. `@InjectMocks` fills what it has
+     * and leaves the rest NULL rather than refusing, so the failure arrives as a NullPointerException
+     * from inside `create` — which says nothing about a collaborator being absent. A missing mock is the
+     * one Mockito failure that never mentions Mockito.
+     */
+    @Mock private IssueHashes issueHashes;
     @Mock private Supplier<String> idGenerator;
 
     @InjectMocks private IssueService issueService;

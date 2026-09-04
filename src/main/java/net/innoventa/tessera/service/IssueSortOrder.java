@@ -65,6 +65,23 @@ public enum IssueSortOrder {
      */
     POINTS("points", "storyPoints"),
 
+    /**
+     * The day somebody means to pick it up, soonest first when ascending — which is what "what is up
+     * next" asks, and the whole reason the column exists.
+     *
+     * <p>⚠️ Nullable, with no null precedence asked for, exactly as {@link #POINTS} is: MySQL has no
+     * {@code NULLS LAST} and emulating it would put a {@code CASE} in front of every ordered read. So
+     * unqueued issues land at one end or the other depending on the engine. Say it rather than fix it —
+     * anybody sorting by this is looking for the rows that <em>have</em> a date.
+     */
+    QUEUED_FOR("queuedFor", "queuedFor"),
+
+    /** The warning date, soonest first when ascending. Nullable on the same terms as {@link #QUEUED_FOR}. */
+    RED_LINE("redLine", "redLine"),
+
+    /** The day it is due, soonest first when ascending. Nullable on the same terms as {@link #QUEUED_FOR}. */
+    DEADLINE("deadline", "deadline"),
+
     UPDATED("updated", "updatedAt");
 
     /** What the default is when nobody asks: most recently touched first. */

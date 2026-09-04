@@ -3,6 +3,7 @@ package net.innoventa.tessera.service.filter;
 import net.innoventa.tessera.domain.LinkTypeEffect;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.util.List;
 import java.util.Objects;
 
@@ -40,8 +41,44 @@ public record IssueFilterView(
     List<LinkReference> links,
     Instant createdAt,
     Instant updatedAt,
-    Instant resolvedAt
+    Instant resolvedAt,
+    /**
+     * When the issue is meant to happen, and how pressing that is today.
+     *
+     * ⚠️ <strong>The three dates are {@link java.time.LocalDate}, not {@code Instant}</strong>, unlike
+     * every timestamp above them — and that is the point rather than an inconsistency. A timestamp is
+     * compared against {@code now}; these are compared against {@code today}, which the factory supplies
+     * as a value of the same type. Carrying them as instants would force a time nobody meant onto each
+     * one, and {@code issue.deadline == today} would then be false for every issue in the tracker.
+     *
+     * ⚠️ <strong>{@code schedule.state} is what a filter should usually say</strong> — one word rather
+     * than a re-derivation of the precedence between three dates: {@code issue.schedule.state ==
+     * 'OVERDUE'}. The raw dates are here beside it because "due this week" is a comparison the verdict
+     * cannot express.
+     */
+    ScheduleReference schedule
 ) {
+
+    /**
+     * The schedule as a filter reads it — {@code issue.schedule.state == 'QUEUED'},
+     * {@code issue.schedule.deadline <= today}.
+     *
+     * <p>⚠️ {@code state} is a {@code String} for the reason every other enum here is: a predicate
+     * compares against a literal, and it cannot name a Java type.
+     *
+     * <p>⚠️ <strong>{@code daysUntilDeadline} is here because date arithmetic is not.</strong> The
+     * engine's {@code plusDays} and {@code minusDays} answer for instants and return nothing for a
+     * date — and nothing compares as true against anything, so {@code deadline <= (today | plusDays(7))}
+     * would silently match every card on the board. A whole number needs no filter at all.
+     */
+    public record ScheduleReference(
+        LocalDate queuedFor,
+        LocalDate redLine,
+        LocalDate deadline,
+        String state,
+        Integer daysUntilDeadline
+    ) {
+    }
 
     /** {@code issue.type.name == 'Bug'}, {@code issue.type.hierarchyLevel == 0}. */
     public record TypeReference(String name, int hierarchyLevel) {

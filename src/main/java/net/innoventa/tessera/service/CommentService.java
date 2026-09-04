@@ -51,7 +51,12 @@ public class CommentService {
 
     @Transactional(readOnly = true)
     public List<CommentResponse> list(Jwt jwt, String issueId) {
-        Member caller = memberService.resolveMember(jwt);
+        return list(memberService.resolveMember(jwt), issueId);
+    }
+
+    /** The same, for a caller that is not an HTTP request — see {@link #add(Member, String, SaveCommentRequest)}. */
+    @Transactional(readOnly = true)
+    public List<CommentResponse> list(Member caller, String issueId) {
         Issue issue = requireIssue(issueId);
 
         return commentRepository.findByIssueIdOrderByCreatedAtAsc(issueId).stream()

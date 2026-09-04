@@ -3,15 +3,16 @@ package net.innoventa.tessera.domain;
 import jakarta.persistence.*;
 import lombok.*;
 
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 
 /**
  * The unit of work. Carries a fixed field set (Phase 1 — no custom fields): a per-project
  * {@code sequence} and the denormalised {@code issueKey} it is referenced by (both stored, ADR-0003),
  * a type/priority/status, an optional {@code resolution}, a reporter, an optional assignee, an
- * optional {@code parent} (the single unified hierarchy link, ticket 10), optional story points, and
- * a global {@code rank} ordering string (ADR-0006, mapped to column {@code lexo_rank} — MySQL reserves
- * {@code RANK}).
+ * optional {@code parent} (the single unified hierarchy link, ticket 10), optional story points, a
+ * small schedule of three dates saying when the work is meant to happen, and a global {@code rank}
+ * ordering string (ADR-0006, mapped to column {@code lexo_rank} — MySQL reserves {@code RANK}).
  * <p>
  * The canonical open/closed invariant lives here: an issue is <strong>open ⇔ {@code resolutionId} is
  * null</strong>, closed ⇔ it is set (ADR-0004) — never judged by status name. Ids are stored flat, no
@@ -157,8 +158,49 @@ public class Issue {
     @Column(name = "story_points")
     private Double storyPoints;
 
-    /** The global LexoRank ordering string (ADR-0006). Column {@code lexo_rank} — MySQL reserves RANK. */
-    @Column(name = "lexo_rank", nullable = false, length = 64)
+    /**
+     * The day somebody intends to pick this up — the "up next" pile, and nothing more than that.
+     *
+     * <p>⚠️ <strong>Not a priority and not a deadline.</strong> A priority says how much an issue
+     * matters and stays true for months; this says what to start this morning and is moved freely. A
+     * backlog where forty issues are "High" needs this, because re-ranking forty rows to push one
+     * forward is not something anybody does twice.
+     *
+     * <p>⚠️ <strong>Cleared when the issue is resolved</strong> — see {@code TransitionService}. Nothing
+     * is picked up twice, so a queue date on finished work is noise on every listing that reads one.
+     */
+    @Column(name = "queued_for")
+    private LocalDate queuedFor;
+
+    /**
+     * The day this stops being comfortable — a warning set ahead of the commitment.
+     *
+     * <p>⚠️ <strong>Kept when the issue is resolved</strong>, unlike {@link #queuedFor}. What the
+     * commitment was is worth reading beside when the work actually landed; erasing it on completion
+     * would delete the only evidence of whether it was met.
+     */
+    @Column(name = "red_line")
+    private LocalDate redLine;
+
+    /**
+     * The day it is due — a commitment to somebody else, where {@link #redLine} is one to yourself.
+     *
+     * <p>⚠️ <strong>A commitment outranks a plan</strong> ({@code ScheduleState}): an issue queued for
+     * next week whose deadline was yesterday reads as overdue, never as scheduled. Pushing a queue date
+     * forward must not be able to make a missed deadline look calm.
+     */
+    @Column(name = "deadline")
+    private LocalDate deadline;
+
+    /**
+     * The global LexoRank ordering string (ADR-0006). Column {@code lexo_rank} — MySQL reserves RANK.
+     *
+     * <p>⚠️ <strong>The length is headroom, not a budget.</strong> Ranks are generated six characters
+     * wide and a rebalance keeps them there; 64 used to be the width and a project reached it, at which
+     * point every insert failed on truncation and the project could no longer accept an issue
+     * (TSSR-155). Nothing should ever approach 255 — if something does, the rebalance is not running.
+     */
+    @Column(name = "lexo_rank", nullable = false, length = 255)
     private String rank;
 
     @Column(name = "created_at", nullable = false, updatable = false)

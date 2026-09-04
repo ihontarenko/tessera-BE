@@ -61,6 +61,17 @@ public class StorageDirectoryAccessTargetResolver implements AccessTargetResolve
     private final StorageDirectories directories;
     private final ProjectRepository  projectRepository;
 
+    /**
+     * ⚠️ The word a policy writes for this type, declared HERE rather than on the class.
+     * A library type cannot carry the annotation — `jmouse-files` has no dependency on
+     * `jmouse-access` and must not grow one — and declaring every resolver's name the same way keeps
+     * one rule instead of two. Same words as Innoventa's and Kiwi's: one type, one spelling.
+     */
+    @Override
+    public String resourceName() {
+        return "directory";
+    }
+
     @Override
     public Class<StorageDirectory> resourceType() {
         return StorageDirectory.class;

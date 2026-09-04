@@ -36,6 +36,14 @@ public record IssueResponse(
     IssueReference parent,
     List<IssueReference> children,
     Double storyPoints,
+    /**
+     * When the issue is meant to happen, and how pressing that is today.
+     *
+     * ⚠️ <strong>Never null</strong> — an issue nobody has scheduled carries
+     * {@link IssueScheduleView#EMPTY} rather than nothing, so a reader never has to tell "no schedule"
+     * apart from "the field was not sent". The four values inside it are the nullable ones.
+     */
+    IssueScheduleView schedule,
     String rank,
     List<String> labels,
     List<IssueLinkView> links,

@@ -12,6 +12,7 @@ import org.springframework.beans.factory.annotation.Qualifier;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
+import java.time.ZoneId;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Map;
@@ -193,6 +194,10 @@ public class BoardFilterEvaluator {
         Map<String, Object> variables = new LinkedHashMap<>();
         variables.put("currentMember", new IssueFilterView.MemberReference(caller.getId(), caller.getDisplayName()));
         variables.put("now", now);
+        // ⚠️ Derived from the same instant the caller pinned, never read from the clock again. The
+        // schedule dates are days and are compared against a day; taking `LocalDate.now()` here would
+        // let one run straddle midnight and judge two cards against different days.
+        variables.put("today", now.atZone(ZoneId.systemDefault()).toLocalDate());
         return variables;
     }
 

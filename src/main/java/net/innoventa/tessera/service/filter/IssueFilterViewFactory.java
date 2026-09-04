@@ -11,6 +11,7 @@ import net.innoventa.tessera.domain.Member;
 import net.innoventa.tessera.domain.Priority;
 import net.innoventa.tessera.domain.Resolution;
 import net.innoventa.tessera.domain.Status;
+import net.innoventa.tessera.dto.issue.IssueScheduleView;
 import net.innoventa.tessera.repository.IssueLabelRepository;
 import net.innoventa.tessera.repository.IssueLinkRepository;
 import net.innoventa.tessera.repository.IssueRepository;
@@ -24,6 +25,7 @@ import net.innoventa.tessera.repository.StatusRepository;
 import org.springframework.stereotype.Service;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneId;
 import java.util.ArrayList;
@@ -80,6 +82,11 @@ public class IssueFilterViewFactory {
         Map<String, List<String>> labels = labelsByIssue(issueIds);
         Map<String, List<IssueFilterView.LinkReference>> links = linksByIssue(issueIds);
 
+        // ⚠️ One day for the whole slice, read once — the same rule the evaluator's `now` follows. A run
+        // that straddled midnight would judge two cards against different days, and nothing on screen
+        // would say why.
+        LocalDate today = LocalDate.now();
+
         return issues.stream()
             .map(issue -> new IssueFilterView(
                 issue.getId(),
@@ -96,9 +103,29 @@ public class IssueFilterViewFactory {
                 links.getOrDefault(issue.getId(), List.of()),
                 instant(issue.getCreatedAt()),
                 instant(issue.getUpdatedAt()),
-                instant(issue.getResolvedAt())
+                instant(issue.getResolvedAt()),
+                scheduleReference(issue, today)
             ))
             .toList();
+    }
+
+    /**
+     * The schedule a predicate reads, judged against one day for the whole slice.
+     *
+     * <p>⚠️ <strong>Built from {@link IssueScheduleView} rather than derived here.</strong> The
+     * precedence between the three dates is decided in one place; a second derivation for the filter
+     * surface is how a card painted amber ends up beside an expression that calls the same issue
+     * overdue.
+     */
+    private IssueFilterView.ScheduleReference scheduleReference(Issue issue, LocalDate today) {
+        IssueScheduleView schedule = IssueScheduleView.from(issue, today);
+
+        return new IssueFilterView.ScheduleReference(
+            schedule.queuedFor(),
+            schedule.redLine(),
+            schedule.deadline(),
+            schedule.state().name(),
+            schedule.daysUntilDeadline());
     }
 
     /**

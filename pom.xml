@@ -196,6 +196,25 @@
             <artifactId>jmouse-access</artifactId>
             <version>${jmouse.version}</version>
         </dependency>
+
+        <!-- Relevance (TSSR-156). ⚠️ For the SECOND issue search — the ranked one — and not for the
+             filtered table at `/api/issues/search`, which sorts by a column and pages in the database.
+             The two answer different questions and neither is a better version of the other. -->
+        <dependency>
+            <groupId>org.jmouse</groupId>
+            <artifactId>jmouse-search</artifactId>
+            <version>${jmouse.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.jmouse</groupId>
+            <artifactId>jmouse-search-text</artifactId>
+            <version>${jmouse.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.jmouse</groupId>
+            <artifactId>jmouse-search-jpa</artifactId>
+            <version>${jmouse.version}</version>
+        </dependency>
         <dependency>
             <groupId>org.jmouse</groupId>
             <artifactId>jmouse-access-enforcement</artifactId>

@@ -69,6 +69,17 @@ public class AttachmentOwnerAccessTargetResolver implements AccessTargetResolver
         this.directoryTargets = directoryTargets;
     }
 
+    /**
+     * ⚠️ The word a policy writes for this type, declared HERE rather than on the class.
+     * A library type cannot carry the annotation — `jmouse-files` has no dependency on
+     * `jmouse-access` and must not grow one — and declaring every resolver's name the same way keeps
+     * one rule instead of two. Same words as Innoventa's and Kiwi's: one type, one spelling.
+     */
+    @Override
+    public String resourceName() {
+        return "file_owner";
+    }
+
     @Override
     public Class<OwnerReference> resourceType() {
         return OwnerReference.class;

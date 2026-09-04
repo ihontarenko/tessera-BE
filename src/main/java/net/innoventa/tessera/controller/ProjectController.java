@@ -12,6 +12,7 @@ import net.innoventa.tessera.dto.project.UpdateProjectRequest;
 import net.innoventa.tessera.service.ProjectIssueTypeService;
 import net.innoventa.tessera.security.Permissions;
 import net.innoventa.tessera.security.access.Scopes;
+import net.innoventa.tessera.security.access.target.ProjectByKey;
 import net.innoventa.tessera.service.IssueKeyPreviewService;
 import net.innoventa.tessera.service.ProjectRekeyService;
 import net.innoventa.tessera.service.ProjectService;
@@ -70,6 +71,24 @@ public class ProjectController {
     @RequiresAccess(permission = Permissions.BROWSE_PROJECT, scope = Scopes.PROJECT)
     public ProjectResponse get(@AuthenticationPrincipal Jwt jwt, @PathVariable String projectId) {
         return projectService.get(jwt, projectId);
+    }
+
+    /**
+     * The same project addressed by its key, which is what its page's URL carries.
+     *
+     * <p>It sits under a literal path segment rather than sharing {@code /api/projects/{id}} and
+     * guessing which of the two an argument is — a route that means one thing cannot be got wrong. The
+     * issue routes made the same choice for the same reason.
+     *
+     * <p>⚠️ <strong>The scope comes from the resource, not from the path.</strong> {@code PROJECT}
+     * resolves its instance from a request parameter literally named {@code projectId}; there is none
+     * here, so {@code ProjectByKey} is what tells the engine which project this is about.
+     */
+    @GetMapping("/by-key/{projectKey}")
+    @RequiresAccess(permission = Permissions.BROWSE_PROJECT, scope = Scopes.PROJECT,
+                    resource = ProjectByKey.class, resourceId = "projectKey")
+    public ProjectResponse getByKey(@AuthenticationPrincipal Jwt jwt, @PathVariable String projectKey) {
+        return projectService.getByKey(jwt, projectKey);
     }
 
     /**

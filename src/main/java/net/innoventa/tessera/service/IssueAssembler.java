@@ -17,6 +17,7 @@ import net.innoventa.tessera.dto.issue.IssueLinkView;
 import net.innoventa.tessera.dto.issue.IssueReference;
 import net.innoventa.tessera.dto.issue.IssueResponse;
 import net.innoventa.tessera.dto.issue.IssueRowResponse;
+import net.innoventa.tessera.dto.issue.IssueScheduleView;
 import net.innoventa.tessera.dto.issue.IssueTypeSummary;
 import net.innoventa.tessera.dto.issue.LinkDirection;
 import net.innoventa.tessera.dto.issue.PrioritySummary;
@@ -37,6 +38,7 @@ import net.innoventa.tessera.repository.StatusRepository;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.time.LocalDate;
 import java.util.Set;
 import java.util.List;
 import java.util.Map;
@@ -74,12 +76,18 @@ public class IssueAssembler {
         Catalogs catalogs = loadCatalogs(issues);
         Map<String, String> parentKeys = parentKeysOf(issues);
 
+        // ⚠️ One day for the whole listing, read once. Every row's schedule is judged against it, and a
+        // listing that straddled midnight would otherwise call two rows due on different days for no
+        // reason a reader could reproduce.
+        LocalDate today = LocalDate.now();
+
         return issues.stream()
-            .map(issue -> toRow(issue, catalogs, issue.getParentId() != null ? parentKeys.get(issue.getParentId()) : null))
+            .map(issue -> toRow(issue, catalogs, today,
+                                issue.getParentId() != null ? parentKeys.get(issue.getParentId()) : null))
             .toList();
     }
 
-    private IssueRowResponse toRow(Issue issue, Catalogs catalogs, String parentKey) {
+    private IssueRowResponse toRow(Issue issue, Catalogs catalogs, LocalDate today, String parentKey) {
         return new IssueRowResponse(
             issue.getId(),
             issue.getIssueKey(),
@@ -94,6 +102,7 @@ public class IssueAssembler {
             memberSummary(catalogs, issue.getAssigneeMemberId()),
             memberSummary(catalogs, issue.getReporterMemberId()),
             issue.getStoryPoints(),
+            IssueScheduleView.from(issue, today),
             parentKey,
             issue.getRank(),
             issue.getResolvedAt(),
@@ -160,6 +169,7 @@ public class IssueAssembler {
             parent,
             children,
             issue.getStoryPoints(),
+            IssueScheduleView.from(issue, LocalDate.now()),
             issue.getRank(),
             labels,
             links(issue, caller),

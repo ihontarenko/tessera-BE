@@ -58,6 +58,7 @@ public class IssueService {
     private final MemberService memberService;
     private final WorkflowResolver workflowResolver;
     private final RankService rankService;
+    private final RankRebalanceService rankRebalanceService;
     private final CallingAgent callingAgent;
     private final IssueKeyAllocator issueKeyAllocator;
     private final IssueHashes       issueHashes;
@@ -365,7 +366,16 @@ public class IssueService {
             .orElse(false);
     }
 
+    /**
+     * The rank a newly-created issue is appended at.
+     *
+     * <p>⚠️ <strong>The rebalance is asked for first, not after a failure.</strong> A project whose
+     * ranks have grown long is repaired while there is still room to repair it — the alternative is the
+     * database refusing the insert on a truncated column, which is exactly what TSSR-155 was.
+     */
     private String nextRank(String projectId) {
+        rankRebalanceService.rebalanceIfNeeded(projectId);
+
         return issueRepository.findFirstByProjectIdOrderByRankDesc(projectId)
             .map(last -> rankService.rankAfter(last.getRank()))
             .orElseGet(rankService::initialRank);

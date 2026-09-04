@@ -182,6 +182,33 @@ public class ProjectService {
         return toResponse(requireProject(projectId), member);
     }
 
+    /**
+     * The same project addressed by its key, which is what its URL carries.
+     *
+     * <p>⚠️ <strong>The key is not permanent, and that is the difference from an issue's hash.</strong>
+     * A project key is configuration and {@code ProjectRekeyService} exists to change it, so an address
+     * built on one resolves for as long as nobody re-keys the project. That is an acceptable trade for
+     * a URL a person can read and say out loud — but it is why the identifier route stays, and why the
+     * interface accepts either and heals the address bar towards the key.
+     *
+     * <p>Case-insensitive, because a key arrives from a hand-typed URL in whatever case somebody used
+     * and the authorization check ahead of this one already matches that way. A route that authorized
+     * case-insensitively and then read case-sensitively would answer 404 to a call it had just allowed.
+     */
+    @Transactional(readOnly = true)
+    public ProjectResponse getByKey(Jwt jwt, String projectKey) {
+        return getByKey(memberService.resolveMember(jwt), projectKey);
+    }
+
+    /** The same, for a caller that is not an HTTP request — see {@link #list(Member)}. */
+    @Transactional(readOnly = true)
+    public ProjectResponse getByKey(Member member, String projectKey) {
+        Project project = projectRepository.findByKeyIgnoreCase(projectKey)
+            .orElseThrow(() -> new ResourceNotFoundException("Project not found: " + projectKey));
+
+        return toResponse(project, member);
+    }
+
     @Transactional
     public ProjectResponse update(Jwt jwt, String projectId, UpdateProjectRequest request) {
         Member member = memberService.resolveMember(jwt);

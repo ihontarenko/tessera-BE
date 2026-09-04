@@ -3,6 +3,7 @@ package net.innoventa.tessera.service;
 import net.innoventa.tessera.domain.Board;
 import net.innoventa.tessera.domain.BoardScopeStrategy;
 import net.innoventa.tessera.domain.Issue;
+import net.innoventa.tessera.domain.ScheduleState;
 import net.innoventa.tessera.domain.Member;
 import net.innoventa.tessera.domain.SwimlaneStrategy;
 import net.innoventa.tessera.dto.board.BoardResponse;
@@ -269,7 +270,10 @@ class BoardServiceFilterTest {
             issue.getId(), issue.getIssueKey(), issue.getSummary(),
             null, null, null, null, null, null, null,
             List.of(), List.of(),
-            null, null, null
+            null, null, null,
+            // Nothing scheduled: these cards exist to exercise the scoping and the evaluator's plumbing,
+            // and a date on them would be a fact the tests around here never assert about.
+            new IssueFilterView.ScheduleReference(null, null, null, ScheduleState.NONE.name(), null)
         );
     }
 

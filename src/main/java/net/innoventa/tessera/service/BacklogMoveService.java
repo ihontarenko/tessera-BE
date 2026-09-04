@@ -50,6 +50,7 @@ public class BacklogMoveService {
     private final SprintMembershipService sprintMembershipService;
     private final BacklogService backlogService;
     private final RankService rankService;
+    private final RankRebalanceService rankRebalanceService;
 
     @Transactional
     public BacklogResponse move(Jwt jwt, String projectId, BacklogMoveRequest request) {
@@ -79,6 +80,10 @@ public class BacklogMoveService {
 
         // Rank and membership are written together: a drag expresses both at once, and half of it is a
         // state the screen cannot render.
+        // A project whose ranks have grown long is repaired before a new one is computed, never after a
+        // truncated write (TSSR-155). It costs one query and does nothing on all but a handful of calls.
+        rankRebalanceService.rebalanceIfNeeded(projectId);
+
         issue.setRank(rankService.between(
             issueService.neighbourRank(request.beforeIssueKey(), projectId),
             issueService.neighbourRank(request.afterIssueKey(), projectId)));

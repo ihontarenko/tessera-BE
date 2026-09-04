@@ -200,6 +200,9 @@ public class IssueSubject implements QuerySubject {
         shownAs.put("issue.reporter", plain("Reporter"));
         shownAs.put("issue.points", plain("Story points"));
         shownAs.put("issue.parent", plain("Parent"));
+        shownAs.put("issue.queuedFor", plain("Queued for"));
+        shownAs.put("issue.redLine", plain("Red line"));
+        shownAs.put("issue.deadline", plain("Deadline"));
         shownAs.put("issue.createdAt", plain("Created"));
         shownAs.put("issue.updatedAt", plain("Updated"));
         shownAs.put("issue.resolvedAt", plain("Resolved at"));

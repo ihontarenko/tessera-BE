@@ -9,6 +9,7 @@ import net.innoventa.tessera.dto.issue.SetParentRequest;
 import net.innoventa.tessera.dto.issue.TransitionIssueRequest;
 import net.innoventa.tessera.dto.issue.UpdateIssueOrganizationRequest;
 import net.innoventa.tessera.dto.issue.UpdateIssueRequest;
+import net.innoventa.tessera.dto.issue.UpdateIssueScheduleRequest;
 import net.innoventa.tessera.domain.Issue;
 import net.innoventa.tessera.security.Permissions;
 import net.innoventa.tessera.security.access.Scopes;
@@ -16,6 +17,7 @@ import net.innoventa.tessera.security.access.target.IssueByKey;
 import net.innoventa.tessera.service.IssueArchiveService;
 import net.innoventa.tessera.service.IssueHierarchyService;
 import net.innoventa.tessera.service.IssueOrganizationService;
+import net.innoventa.tessera.service.IssueScheduleService;
 import net.innoventa.tessera.service.IssueService;
 import net.innoventa.tessera.service.TransitionService;
 import org.jmouse.access.enforcement.RequiresAccess;
@@ -50,6 +52,7 @@ public class IssueController {
     private final IssueArchiveService issueArchiveService;
     private final IssueHierarchyService issueHierarchyService;
     private final IssueOrganizationService issueOrganizationService;
+    private final IssueScheduleService issueScheduleService;
 
     @PostMapping("/api/projects/{projectId}/issues")
     @ResponseStatus(HttpStatus.CREATED)
@@ -166,6 +169,29 @@ public class IssueController {
         @RequestBody SetParentRequest request
     ) {
         return issueHierarchyService.setParent(jwt, issueId, request);
+    }
+
+    /**
+     * When the issue is meant to happen — the queue date, the red line and the deadline, replaced
+     * together.
+     *
+     * <p>⚠️ <strong>Its own route rather than three more fields on the update</strong>, because a
+     * schedule is written from screens that are not editing the issue: a board card, a backlog row, a
+     * client pushing three tickets to today. Every one of those would otherwise have to send the summary,
+     * the description, the priority and the assignee back unchanged in order to move one date.
+     *
+     * <p>⚠️ <strong>{@code EDIT_ISSUE}, not a permission of its own.</strong> Saying when work happens is
+     * editing the issue; a second switch would be another thing to grant, revoke and forget, gating
+     * something anybody who may edit the issue can already express by other means.
+     */
+    @PutMapping("/api/issues/{issueId}/schedule")
+    @RequiresAccess(permission = Permissions.EDIT_ISSUE, scope = Scopes.PROJECT, resource = Issue.class)
+    public IssueResponse updateSchedule(
+        @AuthenticationPrincipal Jwt jwt,
+        @PathVariable String issueId,
+        @Valid @RequestBody UpdateIssueScheduleRequest request
+    ) {
+        return issueScheduleService.update(jwt, issueId, request);
     }
 
     @PutMapping("/api/issues/{issueId}/organization")

@@ -3,9 +3,12 @@ package net.innoventa.tessera.ai;
 import lombok.RequiredArgsConstructor;
 import net.innoventa.tessera.domain.Issue;
 import net.innoventa.tessera.domain.Member;
+import net.innoventa.tessera.domain.MemberKind;
 import net.innoventa.tessera.domain.Project;
+import net.innoventa.tessera.domain.ScheduleState;
 import net.innoventa.tessera.domain.Status;
 import net.innoventa.tessera.domain.Transition;
+import net.innoventa.tessera.dto.comment.CommentResponse;
 import net.innoventa.tessera.dto.comment.SaveCommentRequest;
 import net.innoventa.tessera.dto.issue.CreateIssueLinkRequest;
 import net.innoventa.tessera.dto.issue.CreateIssueRequest;
@@ -13,19 +16,24 @@ import net.innoventa.tessera.dto.issue.IssueLinkView;
 import net.innoventa.tessera.dto.issue.IssueReference;
 import net.innoventa.tessera.dto.issue.IssueResponse;
 import net.innoventa.tessera.dto.issue.IssueRowResponse;
+import net.innoventa.tessera.dto.issue.IssueScheduleView;
 import net.innoventa.tessera.dto.issue.TransitionOption;
 import net.innoventa.tessera.dto.issue.IssueSearchResponse;
 import net.innoventa.tessera.dto.issue.SetParentRequest;
 import net.innoventa.tessera.dto.issue.TransitionIssueRequest;
 import net.innoventa.tessera.dto.issue.UpdateIssueRequest;
+import net.innoventa.tessera.dto.issue.UpdateIssueScheduleRequest;
 import net.innoventa.tessera.exception.BusinessRuleViolationException;
 import net.innoventa.tessera.repository.IssueRepository;
 import net.innoventa.tessera.security.Permissions;
+import net.innoventa.tessera.dto.issue.IssueMatch;
+import net.innoventa.tessera.service.IssueRelevanceSearch;
 import net.innoventa.tessera.service.CommentService;
 import net.innoventa.tessera.service.IssueArchiveService;
 import net.innoventa.tessera.security.access.ProjectAccess;
 import net.innoventa.tessera.service.IssueHierarchyService;
 import net.innoventa.tessera.service.IssueLinkService;
+import net.innoventa.tessera.service.IssueScheduleService;
 import net.innoventa.tessera.service.IssueSearchService;
 import net.innoventa.tessera.service.IssueService;
 import net.innoventa.tessera.service.ProjectService;
@@ -47,11 +55,14 @@ import org.jmouse.storage.Content;
 import org.springframework.stereotype.Component;
 
 import java.io.ByteArrayInputStream;
+import java.time.LocalDate;
+import java.time.format.DateTimeParseException;
 import java.util.LinkedHashMap;
 import java.util.Locale;
 import java.util.List;
 import java.util.Map;
 import java.util.Optional;
+import java.util.Set;
 import java.util.stream.Collectors;
 
 /**
@@ -77,6 +88,7 @@ public class IssueTool implements ToolDefinition {
     private static final int DEFAULT_LIMIT = 25;
 
     private final IssueSearchService searchService;
+    private final IssueRelevanceSearch relevanceSearch;
     private final IssueService       issueService;
     private final CommentService     commentService;
     private final TransitionService  transitionService;
@@ -90,6 +102,7 @@ public class IssueTool implements ToolDefinition {
     private final ToolMembers        members;
     private final ToolCatalogs       catalogs;
     private final FileManagement     files;
+    private final IssueScheduleService issueScheduleService;
 
     /**
      * How a file arrives — the two forms, and the disk-reading capability among them.
@@ -106,8 +119,8 @@ public class IssueTool implements ToolDefinition {
 
     @Override
     public List<ToolAction> actions() {
-        return List.of(search(), list(), get(), create(), update(), assign(), transition(), attach(),
-                       comment(),
+        return List.of(search(), list(), get(), create(), update(), assign(), schedule(), transition(),
+                       attach(), comment(),
                        link(), unlink(), relink(), archive(), archiveCompleted(), unarchive(),
                        delete());
     }
@@ -126,13 +139,22 @@ public class IssueTool implements ToolDefinition {
                 .name("list")
                 .title("List a project's issues")
                 .description("Lists a project's issues in the team's own ranked order — the order the "
-                           + "backlog and the board show. Narrow by who they are assigned to. Use "
+                           + "backlog and the board show. Narrow by who they are assigned to, or by "
+                           + "what the schedule says is due — pass queue='due' to read what is up next "
+                           + "rather than fetching the whole backlog and working it out. Use "
                            + "issues_search instead when looking for words rather than reading a list.")
                 .inputSchema(ArgumentSchema.builder()
                         .scope(ProjectScopeResolver.KIND, "projects_list")
                         .optionalString("assigneeMemberId",
                                 "Restrict to one person's issues, by the member id a previous answer "
                               + "reported. Omit for everyone's.")
+                        .optionalString("queue",
+                                "Narrow to what the schedule says is due, instead of reading the whole "
+                              + "backlog to work it out. 'due' is everything up now — queued for today "
+                              + "or earlier, past its red line, due today, or overdue. 'overdue' is only "
+                              + "what has missed its deadline. 'upcoming' is scheduled for a later day. "
+                              + "'unscheduled' is everything nobody has said a date about. Omit for all "
+                              + "of them.")
                         .limit(DEFAULT_LIMIT))
                 .readOnly()
                 .scopeConfined()
@@ -147,6 +169,8 @@ public class IssueTool implements ToolDefinition {
                 invocation.optionalString("assigneeMemberId").orElse(null),
                 null,
                 null);
+
+        issues = narrowedToQueue(issues, invocation.optionalString("queue").orElse(null));
 
         int limit = invocation.limitArgument(DEFAULT_LIMIT);
 
@@ -163,6 +187,48 @@ public class IssueTool implements ToolDefinition {
         return answer;
     }
 
+    /**
+     * The listing narrowed to what the schedule says, or left whole.
+     *
+     * <p>⚠️ <strong>This is the action the schedule exists for.</strong> Without it, "which tickets are
+     * up next" means fetching every issue in the project, reading each one, and deciding — which is a
+     * lot of tokens spent re-deriving something the tracker already knows, and a different answer every
+     * time because the deciding is a judgement rather than a rule.
+     *
+     * <p>⚠️ <strong>A name this build does not know is refused with the ones that would have worked</strong>,
+     * never silently ignored. A filter that quietly does nothing hands back the whole backlog looking
+     * exactly like a correct answer, and the caller acts on it.
+     */
+    private List<IssueRowResponse> narrowedToQueue(List<IssueRowResponse> issues, String queue) {
+        if (queue == null || queue.isBlank()) {
+            return issues;
+        }
+
+        return switch (queue.trim().toLowerCase(Locale.ROOT)) {
+            case "due"         -> issues.stream().filter(issue -> isDue(issue.schedule().state())).toList();
+            case "overdue"     -> withState(issues, ScheduleState.OVERDUE);
+            case "upcoming"    -> withState(issues, ScheduleState.SCHEDULED);
+            case "unscheduled" -> withState(issues, ScheduleState.NONE);
+            default -> throw new ToolRefusedException(
+                    RefusalReason.INVALID_ARGUMENT,
+                    "'" + queue + "' is not something the queue can be narrowed to. Use 'due' for "
+                  + "everything up now, 'overdue' for missed deadlines, 'upcoming' for a later day, or "
+                  + "'unscheduled' for issues nobody has dated — or omit it for all of them.");
+        };
+    }
+
+    /** Up now: queued for today or earlier, past its red line, due today, or overdue. */
+    private boolean isDue(ScheduleState state) {
+        return state == ScheduleState.QUEUED
+            || state == ScheduleState.RED_LINE
+            || state == ScheduleState.DUE_TODAY
+            || state == ScheduleState.OVERDUE;
+    }
+
+    private List<IssueRowResponse> withState(List<IssueRowResponse> issues, ScheduleState state) {
+        return issues.stream().filter(issue -> issue.schedule().state() == state).toList();
+    }
+
     // ── One issue, in full ───────────────────────────────────────────────────────
 
     private ToolAction get() {
@@ -171,11 +237,14 @@ public class IssueTool implements ToolDefinition {
                 .name("get")
                 .title("Read one issue")
                 .description("Reads one issue in full — its description, its status, who reported and "
-                           + "who it is assigned to, its labels, its links, and what is blocking it. "
+                           + "who it is assigned to, its labels, its links, what is blocking it, and "
+                           + "the whole comment thread, oldest first, with replies nested under what "
+                           + "they answer. "
                            + "A link, parent or child in a project you cannot browse shows its key "
                            + "only. "
                            + "Read this before editing one, because an update replaces the fields it "
-                           + "is given.")
+                           + "is given — and before commenting on one, because the decisions already "
+                           + "taken are in the thread rather than in the description.")
                 .inputSchema(ArgumentSchema.builder()
                         .scope(ProjectScopeResolver.KIND, "projects_list")
                         .requiredString("issueKey", "The issue to read, e.g. TES-42."))
@@ -186,9 +255,20 @@ public class IssueTool implements ToolDefinition {
     }
 
     private Object handleGet(ToolInvocation invocation) {
-        Issue issue = requireIssue(invocation, invocation.requiredString("issueKey"));
+        Issue  issue  = requireIssue(invocation, invocation.requiredString("issueKey"));
+        Member caller = members.actingSubject(invocation);
 
-        return describeInFull(issueService.getByKey(issue.getIssueKey(), members.actingSubject(invocation)));
+        IssueResponse described = issueService.getByKey(issue.getIssueKey(), caller);
+
+        // ⚠️ The thread comes with the issue, and it is not an optional extra (TSSR-0147). Clients were
+        // writing comments they could never read back: every decision recorded on a ticket — a deviation
+        // from what it asked for, a root cause, what a review found — was invisible to the next call,
+        // which then re-decided it. The description is what the issue asked for; the thread is what
+        // happened to it, and reading one without the other is how the same argument gets had twice.
+        //
+        // Read as the caller, so `editable` and the redactions are theirs — this is the same list the
+        // detail screen renders, not a privileged copy of it.
+        return describeInFull(described, commentService.list(caller, described.id()));
     }
 
     /**
@@ -209,7 +289,7 @@ public class IssueTool implements ToolDefinition {
      * passed straight back as an {@code issueKey}. What is handed out is therefore the whole written
      * form, {@code issue:<hash>}, which is a link destination and nothing a tool would accept.
      */
-    private Map<String, Object> describeInFull(IssueResponse issue) {
+    private Map<String, Object> describeInFull(IssueResponse issue, List<CommentResponse> comments) {
         Map<String, Object> described = new LinkedHashMap<>();
 
         described.put("key",         issue.issueKey());
@@ -222,6 +302,13 @@ public class IssueTool implements ToolDefinition {
         described.put("open",        issue.open());
         described.put("storyPoints", issue.storyPoints());
         described.put("labels",      issue.labels());
+
+        // ⚠️ Only where somebody has said something. A schedule of four nulls on every issue in the
+        // tracker is noise a model reads and reasons about, and "nothing is scheduled" is the answer its
+        // absence already gives.
+        if (!issue.schedule().isEmpty()) {
+            described.put("schedule", describeSchedule(issue.schedule()));
+        }
 
         if (issue.reporter() != null) {
             described.put("reporter", issue.reporter().displayName());
@@ -262,6 +349,70 @@ public class IssueTool implements ToolDefinition {
         // no way to tell a workflow that forbids it from a blocker that will lift on its own.
         if (!issue.blockedBy().isEmpty()) {
             described.put("blockedBy", issue.blockedBy());
+        }
+
+        // Last, deliberately: the thread is the longest thing here, and the fields above are what a
+        // reader is usually after. Absent when nobody has said anything — the same reasoning as `links`.
+        if (!comments.isEmpty()) {
+            described.put("comments", describeComments(comments));
+        }
+
+        return described;
+    }
+
+    /**
+     * The thread, oldest first, with each reply nested under what it answers.
+     *
+     * <p>⚠️ <strong>Nested here, though {@link CommentResponse} is flat.</strong> The payload is flat so
+     * that a screen can group it and so that "edit this reply" is not a search through a tree — neither
+     * concern exists for a reader that gets one document and never writes to it. Flat would mean handing
+     * out a comment identifier for every row so the parent reference resolved to something, and this
+     * response deliberately carries no identifiers at all. Nesting says the same thing with none.
+     *
+     * <p>A reply whose parent is not in the list is rendered at the top level rather than dropped. It
+     * cannot happen — deleting a comment takes its replies with it — but silently losing a comment is
+     * the exact fault this whole action was fixing.
+     */
+    private List<Map<String, Object>> describeComments(List<CommentResponse> comments) {
+        Set<String> present = comments.stream().map(CommentResponse::id).collect(Collectors.toSet());
+
+        Map<String, List<CommentResponse>> answers = comments.stream()
+                .filter(comment -> present.contains(comment.parentCommentId()))
+                .collect(Collectors.groupingBy(CommentResponse::parentCommentId,
+                                               LinkedHashMap::new, Collectors.toList()));
+
+        return comments.stream()
+                .filter(comment -> !present.contains(comment.parentCommentId()))
+                .map(comment -> describeComment(comment, answers))
+                .toList();
+    }
+
+    private Map<String, Object> describeComment(CommentResponse comment, Map<String, List<CommentResponse>> answers) {
+        Map<String, Object> described = new LinkedHashMap<>();
+
+        if (comment.author() != null) {
+            described.put("author", comment.author().displayName());
+
+            // ⚠️ Only where it is not a person. Who is talking changes how a remark reads — a decision a
+            // colleague recorded is an instruction, the same sentence from another client is a note about
+            // what some earlier run believed. Said once, on the rows where it is news.
+            if (MemberKind.AGENT.name().equals(comment.author().kind())) {
+                described.put("authorIsClient", true);
+            }
+        }
+        if (comment.topic() != null) {
+            described.put("topic", comment.topic().name());
+        }
+
+        described.put("written", comment.createdAt().toString());
+        described.put("body",    comment.body());
+
+        List<CommentResponse> replies = answers.getOrDefault(comment.id(), List.of());
+
+        if (!replies.isEmpty()) {
+            described.put("replies", replies.stream()
+                    .map(reply -> describeComment(reply, answers))
+                    .toList());
         }
 
         return described;
@@ -383,6 +534,117 @@ public class IssueTool implements ToolDefinition {
                 .affectedRecords(this::selectIssue)
                 .handler(this::handleUpdate)
                 .build();
+    }
+
+    // ── When it is meant to happen ───────────────────────────────────────────────
+
+    /**
+     * The three dates, as their own action rather than fields on {@link #update()}.
+     *
+     * <p>⚠️ <strong>Because one tool is one permission.</strong> A schedule ridden in on
+     * {@code tool:issues_update} would mean switching on <em>may edit an issue</em> also switches on
+     * <em>may say when work happens</em>. Split, an installation grants either without the other — which
+     * is the whole reason the axis is named per action, and the same reasoning that separated assigning.
+     *
+     * <p>⚠️ <strong>Omitted leaves a date alone; {@code 'none'} clears it.</strong> The two are genuinely
+     * different intentions and a client has to be able to express both: pushing a ticket to today must
+     * not silently drop the deadline somebody agreed to. The route underneath replaces all three, so this
+     * reads the issue first and sends back what it was not asked to change — the same thing
+     * {@link #handleAssign} does, for the same reason.
+     *
+     * <p>⚠️ <strong>Not confirmed.</strong> A date is reversible and loses nothing; a confirmation
+     * round-trip on every one would make planning through a conversation unusable.
+     */
+    private ToolAction schedule() {
+        return ToolAction.builder()
+                .toolName(toolName())
+                .name("schedule")
+                .title("Say when an issue is meant to happen")
+                .description("Sets the three dates an issue carries. 'queuedFor' is when you mean to "
+                           + "pick it up — this is the 'up next' pile, and issues_list(queue='due') "
+                           + "reads it. 'redLine' is a warning you set for yourself; 'deadline' is what "
+                           + "you are held to. Each takes 'today', 'tomorrow', a YYYY-MM-DD date, or "
+                           + "'none' to clear it — and a date left out is left alone rather than "
+                           + "cleared, so pushing a ticket to today never drops its deadline. The red "
+                           + "line has to fall on or before the deadline. The queue date is cleared "
+                           + "automatically when the issue is resolved; the other two are kept.")
+                .inputSchema(ArgumentSchema.builder()
+                        .scope(ProjectScopeResolver.KIND, "projects_list")
+                        .requiredString("issueKey", "The issue to schedule, e.g. TES-42.")
+                        .optionalString("queuedFor",
+                                "The day to pick it up: 'today', 'tomorrow', YYYY-MM-DD, or 'none'. "
+                              + "Omit to leave it as it is.")
+                        .optionalString("redLine",
+                                "The warning date, on or before the deadline: 'today', 'tomorrow', "
+                              + "YYYY-MM-DD, or 'none'. Omit to leave it as it is.")
+                        .optionalString("deadline",
+                                "The day it is due: 'today', 'tomorrow', YYYY-MM-DD, or 'none'. Omit to "
+                              + "leave it as it is."))
+                .scopeConfined()
+                .affectedRecords(this::selectIssue)
+                .handler(this::handleSchedule)
+                .build();
+    }
+
+    private Object handleSchedule(ToolInvocation invocation) {
+        Member        acting   = members.actingSubject(invocation);
+        Issue         issue    = requireIssue(invocation, invocation.requiredString("issueKey"));
+        LocalDate     today    = LocalDate.now();
+
+        IssueResponse updated = issueScheduleService.update(
+                acting,
+                issue.getId(),
+                new UpdateIssueScheduleRequest(
+                        dateArgument(invocation, "queuedFor", issue.getQueuedFor(), today),
+                        dateArgument(invocation, "redLine", issue.getRedLine(), today),
+                        dateArgument(invocation, "deadline", issue.getDeadline(), today)));
+
+        Map<String, Object> answer = new LinkedHashMap<>();
+
+        answer.put("issueKey", updated.issueKey());
+        answer.put("schedule", describeSchedule(updated.schedule()));
+
+        return answer;
+    }
+
+    /**
+     * One date argument read against what the issue already carries.
+     *
+     * <p>⚠️ <strong>Three outcomes from one optional string</strong>, which is why this is not
+     * {@code optionalDate}: absent means <em>unchanged</em>, {@code 'none'} means <em>cleared</em>, and
+     * anything else is a day. A typed date argument can only express two of those, and the missing one
+     * is cancelling a deadline — a schedule nobody could cancel would be worse than none.
+     *
+     * <p>⚠️ {@code 'today'} and {@code 'tomorrow'} are spelled out because they are what a conversation
+     * actually says, and because a model computing today's date is a model that gets it wrong across a
+     * timezone. The server knows what day it is.
+     */
+    private LocalDate dateArgument(ToolInvocation invocation, String name, LocalDate current, LocalDate today) {
+        String written = invocation.optionalString(name).orElse(null);
+
+        if (written == null || written.isBlank()) {
+            return current;
+        }
+
+        String wanted = written.trim().toLowerCase(Locale.ROOT);
+
+        return switch (wanted) {
+            case "none", "clear" -> null;
+            case "today"         -> today;
+            case "tomorrow"      -> today.plusDays(1);
+            default              -> parsedDate(name, written.trim());
+        };
+    }
+
+    private LocalDate parsedDate(String name, String written) {
+        try {
+            return LocalDate.parse(written);
+        } catch (DateTimeParseException exception) {
+            throw new ToolRefusedException(
+                    RefusalReason.UNPARSEABLE_VALUE,
+                    "'" + written + "' is not a day this can read for '" + name + "'. Write it as "
+                  + "YYYY-MM-DD, or say 'today', 'tomorrow' or 'none'.");
+        }
     }
 
     // ── Who is working on it ─────────────────────────────────────────────────────
@@ -916,7 +1178,10 @@ public class IssueTool implements ToolDefinition {
                 .name("comment")
                 .title("Comment on an issue")
                 .description("Adds a comment to an issue, attributed to the caller. Comments are how a "
-                           + "decision gets recorded where the people working on the issue will see it.")
+                           + "decision gets recorded where the people working on the issue will see it. "
+                           + "The thread comes back with issues_get, so read the issue before adding to "
+                           + "it — what is already there is usually the answer to whatever prompted the "
+                           + "comment.")
                 .inputSchema(ArgumentSchema.builder()
                         .scope(ProjectScopeResolver.KIND, "projects_list")
                         .requiredString("issueKey", "The issue to comment on, e.g. TES-42.")
@@ -999,13 +1264,21 @@ public class IssueTool implements ToolDefinition {
                 .toolName(toolName())
                 .name("search")
                 .title("Search issues")
-                .description("Finds issues in a project, most recently changed first. Narrow by free "
-                           + "text over the summary, or by who they are assigned to. Every result "
-                           + "carries the issue key — TES-42 — which is what every other action takes "
-                           + "to name an issue.")
+                .description("Finds issues in a project. With 'text' it searches by the WORDS given — "
+                           + "every word must appear, and they do not have to be adjacent or in order — "
+                           + "across the key, the summary, the description AND THE COMMENTS, ranked so "
+                           + "the best answer is first, with the PASSAGES that matched quoted on each "
+                           + "result. Decisions on this tracker live in comment threads, so the passage "
+                           + "is usually the answer and reading the issue is usually unnecessary. "
+                           + "Without 'text' it lists the project's issues, most recently changed "
+                           + "first. Every result carries the issue key — TES-42 — which is what every "
+                           + "other action takes to name an issue.")
                 .inputSchema(ArgumentSchema.builder()
                         .scope(ProjectScopeResolver.KIND, "projects_list")
-                        .optionalString("text", "Words to look for in the summary. Omit for everything.")
+                        .optionalString("text",
+                                "The words to look for, across the key, summary, description and "
+                              + "comments. Several words means all of them, anywhere. Omit to list the "
+                              + "project instead of searching it.")
                         .optionalString("assigneeMemberId",
                                 "Restrict to one person's issues, by the member id a previous answer "
                               + "reported. Omit for everyone's.")
@@ -1016,7 +1289,64 @@ public class IssueTool implements ToolDefinition {
                 .build();
     }
 
+    /**
+     * ⚠️ <strong>Two searches behind one action, chosen by whether there is anything to rank.</strong>
+     *
+     * <p>With text, this is {@link IssueRelevanceSearch} — the key, the summary, the description and the
+     * comments, ranked, with the passage quoted. Without it there is nothing to be relevant <em>to</em>,
+     * and the honest answer is the project's list, most recently changed first, which is what
+     * {@code IssueSearchService} already does well.
+     *
+     * <p>⚠️ <strong>Not a second action, deliberately.</strong> A new one costs a line in the tool policy
+     * AND a line in the role that grants it — and every client already approved goes on being refused
+     * until somebody re-assigns that role. The same capability inside an action people already hold
+     * costs nothing, which is the same call Kiwi made for {@code pages_search} (`KW-0113`).
+     */
     private Object handleSearch(ToolInvocation invocation) {
+        return invocation.optionalString("text")
+                .filter(text -> !text.isBlank())
+                .map(text -> ranked(invocation, text))
+                .orElseGet(() -> listed(invocation));
+    }
+
+    /**
+     * ⚠️ The passages replace the excerpt rather than joining it — sending both spends exactly the
+     * tokens the passage exists to save, and a model given twenty-five opening sentences reads all
+     * twenty-five.
+     */
+    private Object ranked(ToolInvocation invocation, String text) {
+        List<IssueMatch> matches = relevanceSearch.find(
+                members.actingSubject(invocation),
+                text,
+                invocation.scopeId(),
+                invocation.optionalString("assigneeMemberId").orElse(null),
+                invocation.limitArgument(DEFAULT_LIMIT));
+
+        List<Map<String, Object>> issues = matches.stream().map(match -> {
+            Map<String, Object> described = new LinkedHashMap<>(describe(match.issue()));
+
+            if (!match.snippets().isEmpty()) {
+                described.put("matched", match.snippets());
+            }
+
+            return described;
+        }).toList();
+
+        Map<String, Object> answer = new LinkedHashMap<>();
+
+        answer.put("shown",  issues.size());
+        answer.put("issues", issues);
+
+        if (issues.isEmpty()) {
+            answer.put("note", "No issue in this project carries all of those words in its key, "
+                             + "summary, description or comments. Archived issues are not searched. "
+                             + "Try fewer words, or omit 'text' to list the project.");
+        }
+
+        return answer;
+    }
+
+    private Object listed(ToolInvocation invocation) {
         IssueSearchResponse found = searchService.search(
                 members.actingSubject(invocation),
                 invocation.optionalString("text").orElse(null),
@@ -1247,6 +1577,46 @@ public class IssueTool implements ToolDefinition {
 
         if (issue.assignee() != null) {
             described.put("assignee", issue.assignee().displayName());
+        }
+
+        // ⚠️ On a ROW, which is otherwise kept as narrow as it can be, because the row is what
+        // issues_list(queue='due') answers with — an "up next" list that did not say what made each
+        // issue urgent would need a second call per row to find out.
+        if (!issue.schedule().isEmpty()) {
+            described.put("schedule", describeSchedule(issue.schedule()));
+        }
+
+        return described;
+    }
+
+    /**
+     * The schedule as a client reads it: the verdict first, then the dates behind it.
+     *
+     * <p>⚠️ <strong>{@code state} leads, and it is the field to act on.</strong> Three dates compared
+     * against today is a derivation, and a model doing it itself gets a different answer at a timezone
+     * boundary than the board draws. The dates are here so the next call can echo them back and so "when"
+     * can be reported to a person; the word is what a decision hangs on.
+     *
+     * <p>⚠️ Nulls are dropped rather than sent. A client reading {@code deadline: null} has learned
+     * nothing it did not already know from the field's absence, and every one of them costs a line the
+     * model reads.
+     */
+    private Map<String, Object> describeSchedule(IssueScheduleView schedule) {
+        Map<String, Object> described = new LinkedHashMap<>();
+
+        described.put("state", schedule.state().name());
+
+        if (schedule.queuedFor() != null) {
+            described.put("queuedFor", schedule.queuedFor().toString());
+        }
+        if (schedule.redLine() != null) {
+            described.put("redLine", schedule.redLine().toString());
+        }
+        if (schedule.deadline() != null) {
+            described.put("deadline", schedule.deadline().toString());
+            // Negative once it is past — "overdue by three days" rather than a date the reader has to
+            // subtract today from.
+            described.put("daysUntilDeadline", schedule.daysUntilDeadline());
         }
 
         return described;

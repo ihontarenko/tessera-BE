@@ -44,6 +44,7 @@ public class BoardMoveService {
     private final MemberService memberService;
     private final WorkflowResolver workflowResolver;
     private final RankService rankService;
+    private final RankRebalanceService rankRebalanceService;
     private final TransitionService transitionService;
     private final BoardService boardService;
     private final BoardColumnResolver boardColumnResolver;
@@ -72,6 +73,10 @@ public class BoardMoveService {
             Status targetStatus = resolveTargetStatus(targetColumn, mapping, workflowId, issue);
             transitionService.transition(jwt, issue.getId(), new TransitionIssueRequest(targetStatus.getId(), request.resolutionId()));
         }
+
+        // A project whose ranks have grown long is repaired before a new one is computed, never after a
+        // truncated write (TSSR-155). It costs one query and does nothing on all but a handful of calls.
+        rankRebalanceService.rebalanceIfNeeded(projectId);
 
         issue.setRank(rankService.between(
             issueService.neighbourRank(request.beforeIssueKey(), projectId),

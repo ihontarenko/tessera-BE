@@ -31,6 +31,14 @@ public record IssueRowResponse(
     MemberSummary assignee,
     MemberSummary reporter,
     Double storyPoints,
+    /**
+     * When the issue is meant to happen, and how pressing that is today.
+     *
+     * ⚠️ On a <em>row</em> because a row is where somebody decides what to pick up next, which is the
+     * whole reason the schedule exists. Deriving the verdict per row costs three date comparisons and no
+     * query — see {@link IssueScheduleView} — so the alternative is not cheaper, only less useful.
+     */
+    IssueScheduleView schedule,
     String parentKey,
     String rank,
     LocalDateTime resolvedAt,

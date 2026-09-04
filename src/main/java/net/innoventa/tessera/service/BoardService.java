@@ -19,6 +19,7 @@ import net.innoventa.tessera.dto.board.BoardColumnView;
 import net.innoventa.tessera.dto.board.BoardResponse;
 import net.innoventa.tessera.dto.filter.FilterPreviewView;
 import net.innoventa.tessera.dto.sprint.ActiveSprintView;
+import net.innoventa.tessera.dto.issue.IssueScheduleView;
 import net.innoventa.tessera.dto.issue.IssueTypeSummary;
 import net.innoventa.tessera.dto.issue.PrioritySummary;
 import net.innoventa.tessera.dto.issue.StatusSummary;
@@ -323,6 +324,7 @@ public class BoardService {
             issue.getPriorityId(),
             catalogs.epicKeys.get(issue.getId()),
             catalogs.blockedIssueIds.contains(issue.getId()),
+            IssueScheduleView.from(issue, LocalDate.now()),
             issue.getResolvedAt()
         );
     }

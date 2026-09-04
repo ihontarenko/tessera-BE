@@ -4,6 +4,7 @@ import net.innoventa.tessera.domain.Issue;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.repository.JpaRepository;
+import org.springframework.data.jpa.repository.JpaSpecificationExecutor;
 import org.springframework.data.jpa.repository.Query;
 import org.springframework.data.repository.query.Param;
 
@@ -12,7 +13,7 @@ import java.util.Collection;
 import java.util.List;
 import java.util.Optional;
 
-public interface IssueRepository extends JpaRepository<Issue, String> {
+public interface IssueRepository extends JpaRepository<Issue, String>, JpaSpecificationExecutor<Issue> {
 
     List<Issue> findByProjectIdOrderByRankAsc(String projectId);
 
@@ -169,6 +170,13 @@ public interface IssueRepository extends JpaRepository<Issue, String> {
 
     /** The current maximum rank in a project, so a newly-created issue can be appended after it. */
     Optional<Issue> findFirstByProjectIdOrderByRankDesc(String projectId);
+
+    /**
+     * How long the project's longest rank is — the one measurement a rebalance is decided on
+     * (ADR-0006). Null for a project with no issues yet.
+     */
+    @Query("select max(length(issue.rank)) from Issue issue where issue.projectId = :projectId")
+    Integer findLongestRankLength(@Param("projectId") String projectId);
 
     // ── What holds a configuration row ────────────────────────────────────────
     //

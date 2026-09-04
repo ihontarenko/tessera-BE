@@ -64,6 +64,7 @@ policy "tessera/tools" {
         tool:issues_create             "Raise an issue through a tool"
         tool:issues_update             "Change an issue's fields through a tool"
         tool:issues_assign             "Say who is working on an issue, through a tool"
+        tool:issues_schedule           "Say when an issue is meant to happen, through a tool"
         tool:issues_transition         "Move an issue through the workflow, through a tool"
         tool:issues_comment            "Comment on an issue through a tool"
         tool:issues_attach             "Attach a file to an issue through a tool"
@@ -139,6 +140,11 @@ policy "tessera/tools" {
         @GLOBAL  tool:issues_create
         @GLOBAL  tool:issues_update
         @GLOBAL  tool:issues_assign
+        # ⚠️ IN, and it is the second switch here whose effect is about a PLAN rather than about the
+        # work. It is in for the same reason assigning is: an agent that picks a ticket up and leaves
+        # the queue saying something else makes every "what is up next" answer wrong, including its own.
+        # Nothing it can do here is destructive — a date is reversible and loses nothing.
+        @GLOBAL  tool:issues_schedule
         @GLOBAL  tool:issues_transition
         @GLOBAL  tool:issues_comment
         @GLOBAL  tool:issues_attach

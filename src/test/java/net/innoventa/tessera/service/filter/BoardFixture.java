@@ -11,6 +11,7 @@ import net.innoventa.tessera.service.filter.IssueFilterView.StatusReference;
 import net.innoventa.tessera.service.filter.IssueFilterView.TypeReference;
 
 import java.time.Instant;
+import java.time.LocalDate;
 import java.time.LocalDateTime;
 import java.time.ZoneOffset;
 import java.util.List;
@@ -25,6 +26,20 @@ import java.util.List;
 final class BoardFixture {
 
     static final Instant NOW = LocalDateTime.of(2026, 7, 28, 12, 0).toInstant(ZoneOffset.UTC);
+
+    /**
+     * {@link #NOW} as a day, for building the cards' schedule dates around.
+     *
+     * <p>⚠️ Written out rather than converted from {@link #NOW} through a zone, because a conversion
+     * depending on the machine's zone would put builds east of UTC+11 a day out — and a fixture whose
+     * meaning changes with the builder's timezone is the fixture that fails once, on somebody else's
+     * machine, for a reason nobody can reproduce.
+     */
+    static final LocalDate TODAY = LocalDate.of(2026, 7, 28);
+
+    /** No dates at all — the common case, and the one the "no date" narrowing has to find. */
+    private static final IssueFilterView.ScheduleReference NOTHING_SCHEDULED =
+        new IssueFilterView.ScheduleReference(null, null, null, "NONE", null);
 
     static final Member CALLER = Member.builder().id("member-1").displayName("Ivan").build();
 
@@ -46,7 +61,11 @@ final class BoardFixture {
         new EpicReference("TIC-42"),
         List.of("api"),
         List.of(),
-        NOW.minusSeconds(days(30)), NOW.minusSeconds(days(1)), null
+        NOW.minusSeconds(days(30)), NOW.minusSeconds(days(1)), null,
+        // Queued for today and nothing more: the card the "up next" example has to find, and the one
+        // that must NOT match the deadline example — a state filter and a date filter that selected the
+        // same rows would prove neither.
+        schedule(TODAY, null, null, "QUEUED", null)
     );
 
     /** Someone else's, open, in progress, and blocked by {@link #MINE}. */
@@ -61,7 +80,10 @@ final class BoardFixture {
         new EpicReference("TIC-42"),
         List.of(),
         List.of(new LinkReference("Blocks", LinkReference.INWARD, "TIC-1", LinkTypeEffect.BLOCKS_START.name())),
-        NOW.minusSeconds(days(40)), NOW.minusSeconds(days(1)), null
+        NOW.minusSeconds(days(40)), NOW.minusSeconds(days(1)), null,
+        // Past its red line with the deadline three days out — the one card both scheduling examples
+        // select, which is what makes "up next" a superset rather than a synonym.
+        schedule(null, TODAY, TODAY.plusDays(3), "RED_LINE", 3)
     );
 
     /** Nobody's, open, a High bug, untouched for a month — the stale one. */
@@ -76,7 +98,8 @@ final class BoardFixture {
         null,
         List.of("regression", "flaky"),
         List.of(),
-        NOW.minusSeconds(days(60)), NOW.minusSeconds(days(30)), null
+        NOW.minusSeconds(days(60)), NOW.minusSeconds(days(30)), null,
+        NOTHING_SCHEDULED
     );
 
     /** Mine, but finished — the card every "open" filter must drop. */
@@ -91,7 +114,11 @@ final class BoardFixture {
         null,
         List.of(),
         List.of(new LinkReference("Blocks", LinkReference.OUTWARD, "TIC-2", LinkTypeEffect.BLOCKS_START.name())),
-        NOW.minusSeconds(days(50)), NOW.minusSeconds(days(20)), NOW.minusSeconds(days(20))
+        NOW.minusSeconds(days(50)), NOW.minusSeconds(days(20)), NOW.minusSeconds(days(20)),
+        // ⚠️ A deadline three weeks past, and the state is still NONE. Finished work is not overdue — it
+        // was late, which is a different fact. `IssueScheduleView` withholds the verdict once an issue
+        // carries a resolution, and this card is what an example claiming otherwise would trip over.
+        schedule(null, null, TODAY.minusDays(21), "NONE", -21)
     );
 
     static final List<IssueFilterView> BOARD = List.of(MINE, THEIRS, UNASSIGNED, RESOLVED);
@@ -116,6 +143,24 @@ final class BoardFixture {
 
     /** The three fields the retired stub filtered on, in the shape {@code BoardCard} delivered them. */
     record StubCard(String id, String assigneeId, boolean open) {
+    }
+
+    /**
+     * One schedule, written out rather than derived.
+     *
+     * ⚠️ The state is stated, not computed from the dates beside it. {@code ScheduleState} decides the
+     * precedence in production; a fixture that re-derived it here would prove the filter examples
+     * against a second copy of that rule rather than against a card, and the copy could drift from the
+     * original without anything failing.
+     */
+    private static IssueFilterView.ScheduleReference schedule(
+        LocalDate queuedFor,
+        LocalDate redLine,
+        LocalDate deadline,
+        String state,
+        Integer daysUntilDeadline
+    ) {
+        return new IssueFilterView.ScheduleReference(queuedFor, redLine, deadline, state, daysUntilDeadline);
     }
 
     private static MemberReference member(String id, String displayName) {

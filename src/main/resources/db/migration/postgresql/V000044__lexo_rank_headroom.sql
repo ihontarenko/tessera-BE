@@ -1,0 +1,32 @@
+-- ============================================================================
+--  V000044  lexo_rank gets headroom, because a project ran out of it
+-- ----------------------------------------------------------------------------
+--  `lexo_rank` was VARCHAR(64) and the busiest project reached exactly 64. Every
+--  insert into it then failed with
+--
+--      Data truncation: Data too long for column 'lexo_rank' at row 1
+--
+--  and the project could no longer accept an issue by any route. (TSSR-155.)
+--
+--  ⚠️ THE WIDTH IS NOT THE FIX, AND MUST NOT BE READ AS ONE.
+--
+--  Appending an issue used to bisect towards the open end of the rank space —
+--  i, r, v, x, z, zi, zr, zv, zx, zy, zz, zzi … — which converges on "all z" and
+--  buys one more character every six appends. 384 issues, 64 characters. That is
+--  a growth rate, so a wider column only moves the wall: 255 would be reached at
+--  around 1,530 issues.
+--
+--  The fix is in RankService (appending now steps within a fixed six-character
+--  width instead of bisecting) and in RankRebalanceService (a project whose
+--  longest rank passes MAXIMUM_HEALTHY_LENGTH is redistributed evenly before the
+--  next rank is computed). This column is the headroom those two need to repair
+--  data written before them — nothing should ever approach 255 again, and if
+--  something does, the rebalance is not running.
+--
+--  Existing rows are left exactly as they are. Rewriting ranks in SQL would mean
+--  rendering base-36 in SQL; the rebalance does it in Java, in order, on the next
+--  write to the project that needs it.
+-- ============================================================================
+
+ALTER TABLE issues
+    ALTER COLUMN lexo_rank TYPE VARCHAR(255);

@@ -41,13 +41,19 @@ public class FilterGrammarReference {
         new GrammarEntry("issue.links", "List of {type, direction, issueKey}"),
         new GrammarEntry("issue.createdAt", "Instant — compare against now"),
         new GrammarEntry("issue.updatedAt", "Instant — compare against now"),
-        new GrammarEntry("issue.resolvedAt", "Instant, null while open")
+        new GrammarEntry("issue.resolvedAt", "Instant, null while open"),
+        new GrammarEntry("issue.schedule.state",
+                         "'NONE', 'SCHEDULED', 'QUEUED', 'RED_LINE', 'DUE_TODAY' or 'OVERDUE'"),
+        new GrammarEntry("issue.schedule.queuedFor", "Date it is queued for — compare against today"),
+        new GrammarEntry("issue.schedule.redLine", "Date the warning falls due, null when unset"),
+        new GrammarEntry("issue.schedule.deadline", "Date it is due, null when unset")
     );
 
     private static final List<GrammarEntry> VARIABLES = List.of(
         new GrammarEntry("issue", "The card being tested"),
         new GrammarEntry("currentMember", "You — the member running the filter"),
-        new GrammarEntry("now", "The moment the board was loaded, one instant for every card")
+        new GrammarEntry("now", "The moment the board was loaded, one instant for every card"),
+        new GrammarEntry("today", "The same moment as a date — what the schedule is compared against")
     );
 
     private static final List<GrammarEntry> OPERATORS = List.of(
@@ -93,7 +99,16 @@ public class FilterGrammarReference {
             "Unfinished and untouched for two weeks"),
         new GrammarEntry(
             "issue is blocked and issue.assignee == currentMember",
-            "Mine, and held up by something else")
+            "Mine, and held up by something else"),
+        new GrammarEntry(
+            "issue.schedule.state in ['QUEUED','RED_LINE','DUE_TODAY','OVERDUE']",
+            "Up next — everything the schedule says is due now"),
+        new GrammarEntry(
+            "issue.schedule.deadline != null and issue.schedule.daysUntilDeadline <= 7",
+            "Due within a week — count the days, do not add them to a date"),
+        new GrammarEntry(
+            "issue.schedule.queuedFor != null and issue.schedule.queuedFor <= today",
+            "Queued for today or a day already gone")
     );
 
     /**
@@ -111,7 +126,17 @@ public class FilterGrammarReference {
         // people the language was broken when it was not.
         new GrammarEntry(
             "A filter must ask a yes/no question",
-            "`issue.summary` is a value, not a question. Compare it or use `is`.")
+            "`issue.summary` is a value, not a question. Compare it or use `is`."),
+        // ⚠️ Both of these produce a board that looks filtered and is not, which is why they are here
+        // rather than in the filters section as a caveat nobody reads.
+        new GrammarEntry(
+            "`| plusDays` does not work on the schedule dates",
+            "Those filters answer for instants only and return nothing for a date — and nothing compares "
+          + "as true against anything. Use `issue.schedule.daysUntilDeadline` instead."),
+        new GrammarEntry(
+            "Guard a date before comparing it",
+            "An issue with no deadline compares as true against every number. Lead with "
+          + "`issue.schedule.deadline != null and …`.")
     );
 
     private static final FilterGrammarView REFERENCE = new FilterGrammarView(List.of(
